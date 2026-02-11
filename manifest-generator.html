@@ -89,6 +89,10 @@
     };
 
     const stripRunPrefix = (runName) => (runName || '').replace(/^(ad-|nd-|ar-|nr-)/i, '');
+    const getSequencingMethodForType = (sampleType) => {
+      if (!sampleType) return 'WES';
+      return sampleType.includes('RNA') ? 'RNA-Seq' : 'WES';
+    };
 
     const InfoTooltip = ({ text }) => {
       const [show, setShow] = useState(false);
@@ -139,8 +143,6 @@
         { value: 'erv-detection', label: 'ERV Detection', description: 'Detection of endogenous retrovirus expression in tumor RNA',
           requirements: { normal_dna: false, tumor_dna: false, tumor_rna: true, normal_rna: false } }
       ];
-
-      const sequencingMethods = ['WES', 'WGS', 'RNA-Seq', 'Targeted'];
 
       const normalizeMHCAlleles = (alleles) => {
         if (!alleles) return '';
@@ -328,7 +330,12 @@
       const addOrUpdateSample = () => {
         const errors = validateCurrentSample();
         if (errors.length > 0) { setShowValidationErrors(true); return; }
-        const sampleToAdd = { ...currentSample, Group: currentSample.Group || currentSample.Patient_Name };
+        const sampleType = getSampleType(currentSample.Run_Name);
+        const sampleToAdd = {
+          ...currentSample,
+          Sequencing_Method: getSequencingMethodForType(sampleType ? sampleType.type : ''),
+          Group: currentSample.Group || currentSample.Patient_Name
+        };
         if (editingId !== null) {
           setSamples(samples.map(s => s.id === editingId ? { ...sampleToAdd, id: editingId } : s));
           setEditingId(null);
@@ -337,13 +344,23 @@
           setSamples([...samples, { ...sampleToAdd, id: newId }]);
         }
         setShowValidationErrors(false);
-        setCurrentSample({ Patient_Name: '', Run_Name: '', Dataset: '', File_Prefix: '', Sequencing_Method: 'WES', Group: '', MHC_Alleles: '' });
+        // Keep Dataset and Patient persistent for rapid entry of multiple samples.
+        setCurrentSample({
+          Patient_Name: currentSample.Patient_Name,
+          Run_Name: '',
+          Dataset: currentSample.Dataset,
+          File_Prefix: '',
+          Sequencing_Method: 'WES',
+          Group: '',
+          MHC_Alleles: ''
+        });
       };
 
       const editSample = (sample) => {
+        const sampleType = getSampleType(sample.Run_Name);
         setCurrentSample({
           Patient_Name: sample.Patient_Name, Run_Name: sample.Run_Name, Dataset: sample.Dataset,
-          File_Prefix: sample.File_Prefix, Sequencing_Method: sample.Sequencing_Method,
+          File_Prefix: sample.File_Prefix, Sequencing_Method: getSequencingMethodForType(sampleType ? sampleType.type : ''),
           Group: sample.Group === sample.Patient_Name ? '' : sample.Group, MHC_Alleles: sample.MHC_Alleles || ''
         });
         setEditingId(sample.id);
@@ -354,7 +371,11 @@
       const setSampleType = (sampleType) => {
         const prefix = sampleTypePrefixMap[sampleType] || '';
         const identifier = stripRunPrefix(currentSample.Run_Name);
-        setCurrentSample({ ...currentSample, Run_Name: `${prefix}${identifier}` });
+        setCurrentSample({
+          ...currentSample,
+          Run_Name: `${prefix}${identifier}`,
+          Sequencing_Method: getSequencingMethodForType(sampleType)
+        });
       };
 
       const setRunIdentifier = (identifier) => {
@@ -378,6 +399,8 @@
             const sample = { id: idx + 1 };
             headers.forEach((header, i) => { if (header !== 'Normal') sample[header] = values[i] || ''; });
             if (!sample.MHC_Alleles) sample.MHC_Alleles = '';
+            const sampleType = getSampleType(sample.Run_Name);
+            sample.Sequencing_Method = getSequencingMethodForType(sampleType ? sampleType.type : '');
             return sample;
           });
           setSamples(newSamples);
@@ -514,19 +537,21 @@
                   )}
                 </div>
                 <div>
-                  <label className="block text-xs font-medium text-gray-700 mb-1">Sequencing Method *</label>
-                  <select value={currentSample.Sequencing_Method} onChange={(e) => setCurrentSample({ ...currentSample, Sequencing_Method: e.target.value })}
-                    className="w-full px-2 py-1.5 text-sm border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500">
-                    {sequencingMethods.map(m => <option key={m} value={m}>{m}</option>)}
-                  </select>
+                  <label className="block text-xs font-medium text-gray-700 mb-1">
+                    Sequencing Method
+                    <InfoTooltip text="Automatically set from Sample Type (RNA -> RNA-Seq, DNA -> WES)." />
+                  </label>
+                  <div className="w-full px-2 py-1.5 border border-gray-200 rounded-md bg-gray-50 text-sm">
+                    {currentSample.Sequencing_Method || 'Set by Sample Type'}
+                  </div>
                 </div>
                 <div className="md:col-span-2 lg:col-span-3">
                   <label className="block text-xs font-medium text-gray-700 mb-1">
                     Group (hyphen delimited)
-                    <InfoTooltip text={`Optional group identifier for subjoin functionality.\n\nRules:\n• Must be unique per patient\n• Use hyphen for multiple groups (e.g., '1-2')\n• Defaults to Patient Name if not specified\n\nExamples: 1, timepoint1, 1-2`} />
+                    <InfoTooltip text={`Optional group identifier for subjoin functionality.\n\nRules:\n• Must be unique per patient\n• Use hyphen for multiple groups (e.g., '1-2')\n• Defaults to Patient Name if not specified\n\nExamples: 1, timepoint1, 1-2, pre-post`} />
                   </label>
                   <input type="text" value={currentSample.Group} onChange={(e) => setCurrentSample({ ...currentSample, Group: e.target.value })}
-                    placeholder="e.g., 1, 1-2, timepoint1 (defaults to <Patient_Name>)" className="w-full px-2 py-1.5 text-sm border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500" />
+                    placeholder="e.g., 1, 1-2, pre-post (defaults to <Patient_Name>)" className="w-full px-2 py-1.5 text-sm border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500" />
                 </div>
                 <div className="md:col-span-2 lg:col-span-3">
                   <label className="block text-xs font-medium text-gray-700 mb-1">
