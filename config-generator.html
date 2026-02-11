@@ -400,9 +400,9 @@ params.lens$onco$alns_to_cnas$bed = "\${params.ref_dir}/hg38_exome.bed"
 params.lens$onco$alns_to_cnas$gtf = "\${params.ref_dir}/gencode.v37.annotation.with.hervs.gtf"
 
 # HLA Loss of heterozygosity
-params.onco$alns_and_alleles_to_loh_hla$hla_loh_tool = 'lohhla'
-params.onco$alns_and_alleles_to_loh_hla$hla_loh_tool_refs = "['lohhla': \"\${params.ref_dir}/hla_fix.fasta\"]"
-params.onco$alns_and_alleles_to_loh_hla$hla_loh_tool_parameters = '[]'
+params.lens$onco$alns_and_alleles_to_loh_hla$hla_loh_tool = 'lohhla'
+params.lens$onco$alns_and_alleles_to_loh_hla$hla_loh_tool_refs = "['lohhla': \"\${params.ref_dir}/hla_fix.fasta\"]"
+params.lens$onco$alns_and_alleles_to_loh_hla$hla_loh_tool_parameters = '[]'
 
 # CTA/Self-antigens Neoantigen Workflow
 params.lens$neos$selfs_to_neos$gtf = "\${params.ref_dir}/gencode.v37.annotation.with.hervs.gtf"
