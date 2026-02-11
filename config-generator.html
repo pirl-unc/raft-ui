@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>RAFT Workflow Configuration Generator</title>
     <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/pako@2.1.0/dist/pako.min.js"></script>
     <style>
         .accordion-content {
             max-height: 0;
@@ -82,29 +83,42 @@
         }
     </style>
 </head>
-<body class="bg-gray-50 min-h-screen p-4 md:p-6">
+<body class="bg-gray-50 min-h-screen p-6">
     <div class="max-w-7xl mx-auto">
-        <header class="mb-6">
-            <h1 class="text-2xl md:text-3xl font-bold text-gray-900 mb-1">RAFT Workflow Configuration Generator</h1>
-            <p class="text-sm text-gray-600">Generate Nextflow configuration files for RAFT workflows</p>
+        <header class="mb-8 flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+            <div>
+                <h1 class="text-4xl font-bold text-gray-900 mb-2">RAFT Workflow Configuration Generator</h1>
+                <p class="text-gray-600">Generate Nextflow configuration files for RAFT workflows</p>
+            </div>
+            <div class="flex gap-2">
+                <button id="headerDownloadConfig" class="bg-gray-600 text-white px-4 py-2 rounded-md hover:bg-gray-700 transition">
+                    Download
+                </button>
+                <button id="headerSaveToRaft" class="bg-green-600 text-white px-4 py-2 rounded-md hover:bg-green-700 transition hidden">
+                    Save to RAFT
+                </button>
+                <button id="headerCopyForCLI" class="bg-green-600 text-white px-4 py-2 rounded-md hover:bg-green-700 transition hidden">
+                    Copy to CLI
+                </button>
+            </div>
         </header>
 
         <!-- Workflow Selection -->
-        <div class="bg-white rounded-lg shadow-md p-4 md:p-6 mb-4">
-            <h2 class="text-base font-semibold mb-3">Workflow Selection</h2>
-
-            <div class="grid grid-cols-1 md:grid-cols-3 gap-3 mb-3">
+        <div class="bg-white rounded-lg shadow-md p-6 mb-6">
+            <h2 class="text-2xl font-semibold mb-4">Workflow Selection</h2>
+            
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
                 <div>
-                    <label class="block text-xs font-medium text-gray-700 mb-1">Workflow Type</label>
-                    <select id="workflowType" class="w-full border border-gray-300 rounded-md px-2 py-1.5 text-sm focus:ring-2 focus:ring-blue-500">
+                    <label class="block text-sm font-medium text-gray-700 mb-2">Workflow Type</label>
+                    <select id="workflowType" class="w-full border border-gray-300 rounded-md p-2 focus:ring-2 focus:ring-blue-500">
                         <option value="">Select workflow...</option>
                         <option value="lens">LENS - Landscape of Effective Neoantigens Software</option>
                     </select>
                 </div>
 
                 <div>
-                    <label class="block text-xs font-medium text-gray-700 mb-1">Species</label>
-                    <select id="species" class="w-full border border-gray-300 rounded-md px-2 py-1.5 text-sm focus:ring-2 focus:ring-blue-500">
+                    <label class="block text-sm font-medium text-gray-700 mb-2">Species</label>
+                    <select id="species" class="w-full border border-gray-300 rounded-md p-2 focus:ring-2 focus:ring-blue-500">
                         <option value="">Select species...</option>
                         <option value="human">Human (Homo sapiens)</option>
                         <option value="mouse">Mouse (Mus musculus)</option>
@@ -112,8 +126,8 @@
                 </div>
 
                 <div>
-                    <label class="block text-xs font-medium text-gray-700 mb-1">Starting Data</label>
-                    <select id="startingData" class="w-full border border-gray-300 rounded-md px-2 py-1.5 text-sm focus:ring-2 focus:ring-blue-500">
+                    <label class="block text-sm font-medium text-gray-700 mb-2">Starting Data</label>
+                    <select id="startingData" class="w-full border border-gray-300 rounded-md p-2 focus:ring-2 focus:ring-blue-500">
                         <option value="">Select starting point...</option>
                         <option value="fastqs">FASTQs</option>
                         <option value="bams">BAMs</option>
@@ -121,9 +135,9 @@
                 </div>
             </div>
 
-            <div class="mb-3">
-                <label class="block text-xs font-medium text-gray-700 mb-1">Workflow Version</label>
-                <select id="workflowVersion" class="w-full border border-gray-300 rounded-md px-2 py-1.5 text-sm focus:ring-2 focus:ring-blue-500">
+            <div class="mb-4">
+                <label class="block text-sm font-medium text-gray-700 mb-2">Workflow Version</label>
+                <select id="workflowVersion" class="w-full border border-gray-300 rounded-md p-2 focus:ring-2 focus:ring-blue-500">
                     <option value="">Select version...</option>
                     <option value="lens-v1.8">lens-v1.8</option>
                     <option value="lens-v1.7">lens-v1.7</option>
@@ -131,73 +145,79 @@
                 </select>
             </div>
 
-            <button id="loadWorkflow" class="bg-blue-600 text-white px-4 py-2 text-sm rounded-md hover:bg-blue-700 transition flex items-center gap-2">
+            <button id="loadWorkflow" class="bg-blue-600 text-white px-6 py-2 rounded-md hover:bg-blue-700 transition flex items-center gap-2">
                 <span>Load Workflow Configuration</span>
                 <div id="loadingSpinner" class="loading hidden"></div>
             </button>
 
-            <div id="errorMessage" class="mt-3 p-3 bg-red-50 border border-red-200 rounded-md text-sm text-red-700 hidden"></div>
+            <div id="errorMessage" class="mt-4 p-4 bg-red-50 border border-red-200 rounded-md text-red-700 hidden"></div>
         </div>
 
         <!-- Workflow Configuration -->
         <div id="workflowConfig" class="hidden">
-            <div class="bg-white rounded-lg shadow-md p-4 md:p-6 mb-4">
-                <h2 class="text-base font-semibold mb-3">Workflow Configuration</h2>
-                <div id="configSections" class="space-y-3"></div>
+            <div class="bg-white rounded-lg shadow-md p-6 mb-6">
+                <h2 class="text-2xl font-semibold mb-4">Workflow Configuration</h2>
+                <div id="configSections" class="space-y-4"></div>
             </div>
 
             <!-- Methods Description Section -->
-            <div class="bg-white rounded-lg shadow-md overflow-hidden mb-4">
-                <div class="bg-gray-100 px-4 py-3 cursor-pointer flex justify-between items-center" id="methodsHeader">
-                    <h2 class="text-base font-semibold">Methods Description</h2>
-                    <svg class="w-5 h-5 transform transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <div class="bg-white rounded-lg shadow-md overflow-hidden mb-6">
+                <div class="bg-gray-100 px-6 py-4 cursor-pointer flex justify-between items-center" id="methodsHeader">
+                    <h2 class="text-2xl font-semibold">Methods Description</h2>
+                    <svg class="w-6 h-6 transform transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path>
                     </svg>
                 </div>
-
-                <div class="methods-output-section p-4">
-                    <div class="mb-3 flex flex-wrap gap-2">
-                        <button id="copyMethods" class="bg-green-600 text-white px-3 py-1.5 text-sm rounded-md hover:bg-green-700 transition">
+                
+                <div class="methods-output-section p-6">
+                    <div class="mb-4 flex gap-2">
+                        <button id="copyMethods" class="bg-green-600 text-white px-4 py-2 rounded-md hover:bg-green-700 transition">
                             Copy to Clipboard
                         </button>
-                        <button id="downloadMethods" class="bg-blue-600 text-white px-3 py-1.5 text-sm rounded-md hover:bg-blue-700 transition">
+                        <button id="downloadMethods" class="bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700 transition">
                             Download Methods.txt
                         </button>
                     </div>
 
-                    <textarea id="methodsOutput" class="w-full h-64 md:h-80 font-mono text-xs border border-gray-300 rounded-md p-3 focus:ring-2 focus:ring-blue-500" readonly></textarea>
+                    <textarea id="methodsOutput" class="w-full h-96 font-mono text-sm border border-gray-300 rounded-md p-4 focus:ring-2 focus:ring-blue-500" readonly></textarea>
                 </div>
             </div>
 
             <!-- Output Section -->
             <div class="bg-white rounded-lg shadow-md overflow-hidden">
-                <div class="bg-gray-100 px-4 py-3 cursor-pointer flex justify-between items-center" id="configHeader">
-                    <h2 class="text-base font-semibold">Configuration File</h2>
-                    <svg class="w-5 h-5 transform transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <div class="bg-gray-100 px-6 py-4 cursor-pointer flex justify-between items-center" id="configHeader">
+                    <h2 class="text-2xl font-semibold">Configuration File</h2>
+                    <svg class="w-6 h-6 transform transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path>
                     </svg>
                 </div>
-
-                <div class="config-output-section p-4">
-                    <div class="mb-3 flex flex-wrap gap-2">
-                        <button id="copyConfig" class="bg-green-600 text-white px-3 py-1.5 text-sm rounded-md hover:bg-green-700 transition">
+                
+                <div class="config-output-section p-6">
+                    <div class="mb-4 flex gap-2 flex-wrap">
+                        <button id="copyConfig" class="bg-gray-600 text-white px-4 py-2 rounded-md hover:bg-gray-700 transition">
                             Copy to Clipboard
                         </button>
-                        <button id="downloadConfig" class="bg-blue-600 text-white px-3 py-1.5 text-sm rounded-md hover:bg-blue-700 transition">
-                            Download .config
+                        <button id="downloadConfig" class="bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700 transition">
+                            Download .config File
                         </button>
-                        <button id="saveToRaft" class="bg-purple-600 text-white px-3 py-1.5 text-sm rounded-md hover:bg-purple-700 transition">
+                        <button id="copyForCLI" class="bg-green-600 text-white px-4 py-2 rounded-md hover:bg-green-700 transition hidden">
+                            Copy to CLI
+                        </button>
+                        <button id="saveToRaft" class="bg-green-600 text-white px-4 py-2 rounded-md hover:bg-green-700 transition hidden">
                             Save to RAFT
                         </button>
                     </div>
 
-                    <textarea id="configOutput" class="w-full h-64 md:h-80 font-mono text-xs border border-gray-300 rounded-md p-3 focus:ring-2 focus:ring-blue-500" readonly></textarea>
+                    <textarea id="configOutput" class="w-full h-96 font-mono text-sm border border-gray-300 rounded-md p-4 focus:ring-2 focus:ring-blue-500" readonly></textarea>
                 </div>
             </div>
         </div>
     </div>
 
     <script>
+        // Detect if running locally (RAFT CLI server) or externally (GitHub Pages)
+        const IS_LOCAL = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+
         // Real LENS config data (from uploaded file)
         const LENS_CONFIG_TEXT = `params.dummy_file = "\${params.ref_dir}/dummy_file"
 
@@ -492,36 +512,6 @@ params.lens$lenstools_make_lens_report$lens_version = 'lens-v1.8'
         // API configuration
         const API_BASE = window.location.origin;
 
-        // Container label mappings (loaded from server)
-        let containerLabelMappings = {};
-
-        // Load container mappings from server
-        async function loadContainerMappings() {
-            try {
-                const response = await fetch(`${API_BASE}/api/container-mappings`);
-                if (response.ok) {
-                    const data = await response.json();
-                    containerLabelMappings = data.mappings || {};
-                    console.log('Loaded container mappings:', containerLabelMappings);
-                }
-            } catch (e) {
-                console.warn('Failed to load container mappings:', e);
-            }
-        }
-
-        // Resolve tool name to label name for nextflow.config
-        function resolveContainerLabel(toolName, species = 'human') {
-            if (containerLabelMappings[toolName]) {
-                const mapping = containerLabelMappings[toolName];
-                if (typeof mapping === 'object') {
-                    // Species-dependent mapping
-                    return mapping[species] || mapping['default'] || toolName;
-                }
-                return mapping;
-            }
-            return toolName;
-        }
-
         // State management
         const state = {
             workflow: null,
@@ -730,8 +720,6 @@ params.lens$lenstools_make_lens_report$lens_version = 'lens-v1.8'
             'seqtk': '1.4',
             'sequenza-utils': '3.0.0',
             'sequenzautils': '3.0.0',
-            'sequenza_r': '3.0.0',
-            'sequenza_utils': '3.0.0',
             'snaf': '0.7.0-lens-compat-mhcflurry',
             'snpeff': 'latest',
             'snpsift': '5.2',
@@ -1101,8 +1089,6 @@ params.lens$lenstools_make_lens_report$lens_version = 'lens-v1.8'
             'seqtk': ['1.4', '1.3'],
             'sequenza-utils': ['3.0.0', '2.2.0'],
             'sequenzautils': ['3.0.0', '2.2.0'],
-            'sequenza_r': ['3.0.0', '2.2.0'],
-            'sequenza_utils': ['3.0.0', '2.2.0'],
             'snpsift': ['5.2', '5.1', '5.0'],
             'somalier': ['0.2.19', '0.2.18', '0.2.17'],
             'star': ['2.7.3a', '2.7.11b', '2.7.10b', '2.7.9a'],
@@ -1398,18 +1384,28 @@ params.lens$lenstools_make_lens_report$lens_version = 'lens-v1.8'
         document.getElementById('loadWorkflow').addEventListener('click', loadWorkflowConfig);
         document.getElementById('copyConfig').addEventListener('click', copyConfigToClipboard);
         document.getElementById('downloadConfig').addEventListener('click', downloadConfigFile);
+        document.getElementById('copyForCLI').addEventListener('click', copyForCLI);
         document.getElementById('saveToRaft').addEventListener('click', saveConfigToRaft);
         document.getElementById('copyMethods').addEventListener('click', copyMethodsToClipboard);
         document.getElementById('downloadMethods').addEventListener('click', downloadMethodsFile);
-        document.getElementById('copyMethods').addEventListener('click', copyMethodsToClipboard);
-        document.getElementById('downloadMethods').addEventListener('click', downloadMethodsFile);
+
+        // Header button listeners (same functions as in-section buttons)
+        document.getElementById('headerDownloadConfig').addEventListener('click', downloadConfigFile);
+        document.getElementById('headerCopyForCLI').addEventListener('click', copyForCLI);
+        document.getElementById('headerSaveToRaft').addEventListener('click', saveConfigToRaft);
 
         // Initialize form from URL parameters on page load
         initializeFromUrl();
 
-        // Load container mappings at startup
-        loadContainerMappings();
-        
+        // Show appropriate button based on local vs external hosting
+        if (IS_LOCAL) {
+            document.getElementById('saveToRaft').classList.remove('hidden');
+            document.getElementById('headerSaveToRaft').classList.remove('hidden');
+        } else {
+            document.getElementById('copyForCLI').classList.remove('hidden');
+            document.getElementById('headerCopyForCLI').classList.remove('hidden');
+        }
+
         // Methods header toggle
         document.getElementById('methodsHeader').addEventListener('click', () => {
             const content = document.querySelector('.methods-output-section');
@@ -1920,8 +1916,8 @@ params.lens$lenstools_make_lens_report$lens_version = 'lens-v1.8'
                 'rna_quant_tool': ['salmon', 'kallisto'],
                 'tx_quant_tool': ['salmon', 'kallisto'],
                 'viral_detect_tool': ['virdetect'],
-                'tumor_purities_tool': ['sequenza_r', 'sequenza_utils'],
-                'purity_tool': ['sequenza_r', 'sequenza_utils'],
+                'tumor_purities_tool': ['sequenza'],
+                'purity_tool': ['sequenza'],
                 'cna_tool': ['cnvkit'],
                 'phasing_tool': ['whatshap'],
                 'var_phaser_tool': ['whatshap'],
@@ -2017,8 +2013,6 @@ params.lens$lenstools_make_lens_report$lens_version = 'lens-v1.8'
                 'pepsickle': 'Pepsickle',
                 'virdetect': 'VirDetect',
                 'sequenza': 'Sequenza',
-                'sequenza_r': 'Sequenza R',
-                'sequenza_utils': 'Sequenza Utils',
                 'cnvkit': 'CNVkit',
                 'whatshap': 'WhatsHap',
                 'lohhla': 'LOHHLA',
@@ -3365,42 +3359,27 @@ params.lens$lenstools_make_lens_report$lens_version = 'lens-v1.8'
             });
 
             config.push('');
-            config.push('// === CONTAINERS ===');
-            config.push('// Format: tool = container_image (used by raft update-parameters)');
-            config.push('// Note: Tool names are mapped to nextflow.config labels automatically');
+            config.push('// Container Versions');
             Object.keys(toolGroups).forEach(parameter => {
                 const group = toolGroups[parameter];
                 group.tools.forEach((tool, index) => {
                     const customContainer = group.customContainers[index];
-                    let containerImage;
-
-                    // Get the container lookup name (may differ from tool name)
-                    let containerLookupName = tool;
-
-                    // Special handling for sequenza split tools
-                    if (tool === 'sequenza_r') {
-                        containerLookupName = 'r-sequenza';
-                    } else if (tool === 'sequenza_utils') {
-                        containerLookupName = 'sequenza-utils';
-                    }
-
                     if (customContainer) {
                         // Custom container path
-                        containerImage = customContainer;
+                        config.push(`// ${tool}: ${customContainer}`);
                     } else {
                         // Check if this is a DockerHub or BioContainers image
-                        const cachedData = biocontainersCache[containerLookupName] || biocontainersCache[tool];
+                        const cachedData = biocontainersCache[tool];
                         const version = group.versions[index];
-
+                        
                         if (cachedData && cachedData.account && cachedData.repo) {
                             // DockerHub image
-                            containerImage = `${cachedData.account}/${cachedData.repo}:${version}`;
+                            config.push(`// ${tool}: ${cachedData.account}/${cachedData.repo}:${version} (DockerHub)`);
                         } else {
                             // BioContainers image
-                            containerImage = `quay.io/biocontainers/${containerLookupName}:${version}`;
+                            config.push(`// ${tool}: quay.io/biocontainers/${tool}:${version}`);
                         }
                     }
-                    config.push(`// ${tool} = ${containerImage}`);
                 });
             });
 
@@ -3444,7 +3423,42 @@ params.lens$lenstools_make_lens_report$lens_version = 'lens-v1.8'
             document.body.removeChild(a);
             URL.revokeObjectURL(url);
         }
-        
+
+        async function copyForCLI() {
+            const content = document.getElementById('configOutput').value;
+            if (!content.trim()) {
+                alert('No config to copy. Please generate a configuration first.');
+                return;
+            }
+            try {
+                // Compress with pako (gzip)
+                const compressed = pako.gzip(content);
+                // Base64 encode
+                const base64 = btoa(String.fromCharCode.apply(null, compressed));
+                const encoded = `RAFT1:config:${base64}`;
+                await navigator.clipboard.writeText(encoded);
+
+                // Update both buttons (section and header)
+                const buttons = [document.getElementById('copyForCLI'), document.getElementById('headerCopyForCLI')];
+                buttons.forEach(button => {
+                    const originalText = button.textContent;
+                    button.textContent = 'Copied!';
+                    button.classList.add('bg-green-700');
+                    setTimeout(() => {
+                        button.textContent = originalText;
+                        button.classList.remove('bg-green-700');
+                    }, 2000);
+                });
+            } catch (error) {
+                console.error('Copy failed:', error);
+                // Fallback: show in prompt for manual copy
+                const compressed = pako.gzip(content);
+                const base64 = btoa(String.fromCharCode.apply(null, compressed));
+                const encoded = `RAFT1:config:${base64}`;
+                prompt('Copy this code and paste it into the RAFT CLI:', encoded);
+            }
+        }
+
         function copyMethodsToClipboard() {
             const textarea = document.getElementById('methodsOutput');
             textarea.select();

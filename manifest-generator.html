@@ -5,10 +5,10 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>RAFT Manifest Generator</title>
   <script src="https://cdn.tailwindcss.com"></script>
-  <script src="https://unpkg.com/react@18/umd/react.development.js" crossorigin></script>
-  <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js" crossorigin></script>
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
-  <script src="https://unpkg.com/lucide-react@0.263.0/dist/umd/lucide-react.min.js"></script>
+  <script src="https://unpkg.com/pako@2.1.0/dist/pako.min.js"></script>
   <script>
     window.addEventListener('load', function() {
       setTimeout(function() {
@@ -38,22 +38,27 @@
       <p style="color: #666; font-size: 0.875rem;">If this message persists, check your browser console for errors.</p>
     </div>
   </div>
-  <script type="text/babel" data-presets="react" data-type="module">
-    const lucide = typeof lucideReact !== 'undefined' ? lucideReact : {};
-    const IconFallback = ({ children }) => <span style={{display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: '1em', height: '1em'}}>{children || '•'}</span>;
-    const Plus = lucide.Plus || (() => <IconFallback>+</IconFallback>);
-    const Trash2 = lucide.Trash2 || (() => <IconFallback>×</IconFallback>);
-    const Download = lucide.Download || (() => <IconFallback>↓</IconFallback>);
-    const Upload = lucide.Upload || (() => <IconFallback>↑</IconFallback>);
-    const AlertCircle = lucide.AlertCircle || (() => <IconFallback>!</IconFallback>);
-    const Info = lucide.Info || (() => <IconFallback>i</IconFallback>);
-    const Users = lucide.Users || (() => <IconFallback>👥</IconFallback>);
-    const Layers = lucide.Layers || (() => <IconFallback>≡</IconFallback>);
-    const Edit2 = lucide.Edit2 || (() => <IconFallback>✎</IconFallback>);
-    const CheckCircle = lucide.CheckCircle || (() => <IconFallback>✓</IconFallback>);
+  <script type="text/babel" data-presets="react">
     const { useState, useEffect, useCallback } = React;
 
+    // Inline SVG icons (replacing lucide-react for CDN compatibility)
+    const Icon = ({ d, size = 24, className = '' }) => (
+      <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>{d}</svg>
+    );
+    const Plus = ({ size, className }) => <Icon size={size} className={className} d={<><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></>} />;
+    const Trash2 = ({ size, className }) => <Icon size={size} className={className} d={<><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></>} />;
+    const Download = ({ size, className }) => <Icon size={size} className={className} d={<><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></>} />;
+    const Upload = ({ size, className }) => <Icon size={size} className={className} d={<><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></>} />;
+    const AlertCircle = ({ size, className }) => <Icon size={size} className={className} d={<><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></>} />;
+    const Info = ({ size, className }) => <Icon size={size} className={className} d={<><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></>} />;
+    const Users = ({ size, className }) => <Icon size={size} className={className} d={<><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></>} />;
+    const Layers = ({ size, className }) => <Icon size={size} className={className} d={<><polygon points="12 2 2 7 12 12 22 7 12 2"/><polyline points="2 17 12 22 22 17"/><polyline points="2 12 12 17 22 12"/></>} />;
+    const Edit2 = ({ size, className }) => <Icon size={size} className={className} d={<><path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"/></>} />;
+    const CheckCircle = ({ size, className }) => <Icon size={size} className={className} d={<><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></>} />;
+    const Copy = ({ size, className }) => <Icon size={size} className={className} d={<><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></>} />;
+
     const API_BASE = window.location.origin;
+    const IS_LOCAL = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
 
     const getSessionParams = () => {
       const params = new URLSearchParams(window.location.search);
@@ -64,30 +69,16 @@
       };
     };
 
-    const sampleTypeOptions = [
-      { value: 'ad-', label: 'Tumor DNA', isNormal: false, isDNA: true },
-      { value: 'nd-', label: 'Normal DNA', isNormal: true, isDNA: true },
-      { value: 'ar-', label: 'Tumor RNA', isNormal: false, isDNA: false },
-      { value: 'nr-', label: 'Normal RNA', isNormal: true, isDNA: false }
-    ];
-
     const getSampleType = (runName) => {
       if (!runName) return null;
       const prefix = runName.substring(0, 3).toLowerCase();
       const typeMap = {
-        'ad-': { type: 'Tumor DNA', isNormal: false, isDNA: true, prefix: 'ad-' },
-        'nd-': { type: 'Normal DNA', isNormal: true, isDNA: true, prefix: 'nd-' },
-        'ar-': { type: 'Tumor RNA', isNormal: false, isDNA: false, prefix: 'ar-' },
-        'nr-': { type: 'Normal RNA', isNormal: true, isDNA: false, prefix: 'nr-' }
+        'ad-': { type: 'Tumor DNA', isNormal: false, isDNA: true },
+        'nd-': { type: 'Normal DNA', isNormal: true, isDNA: true },
+        'ar-': { type: 'Tumor RNA', isNormal: false, isDNA: false },
+        'nr-': { type: 'Normal RNA', isNormal: true, isDNA: false }
       };
       return typeMap[prefix] || null;
-    };
-
-    const getRunNameParts = (runName) => {
-      if (!runName) return { prefix: '', identifier: '' };
-      const match = runName.match(/^(ad-|nd-|ar-|nr-)(.*)/i);
-      if (match) return { prefix: match[1].toLowerCase(), identifier: match[2] };
-      return { prefix: '', identifier: runName };
     };
 
     const InfoTooltip = ({ text }) => {
@@ -118,19 +109,6 @@
         Sequencing_Method: 'WES', Group: '', MHC_Alleles: ''
       });
       const [samples, setSamples] = useState([]);
-
-      // FASTQ autocomplete state
-      const [availableDatasets, setAvailableDatasets] = useState([]);
-      const [selectedDatasets, setSelectedDatasets] = useState([]);
-      const [fastqPrefixes, setFastqPrefixes] = useState([]);
-      const [showPrefixDropdown, setShowPrefixDropdown] = useState(false);
-      const [prefixFilter, setPrefixFilter] = useState('');
-      const [fastqValidation, setFastqValidation] = useState({});
-      const [sampleFastqValidation, setSampleFastqValidation] = useState({}); // Validation status for all samples
-
-      // Persistence within session
-      const [persistedDataset, setPersistedDataset] = useState('');
-      const [persistedPatient, setPersistedPatient] = useState('');
 
       const workflows = [
         { value: 'lens', label: 'LENS (Tumor Antigens)', description: 'Complete tumor antigen prediction from SNVs, InDels, fusions, splice variants, ERVs, viruses, and CTAs',
@@ -185,85 +163,6 @@
         return [headers.join('\t'), ...rows.map(r => r.join('\t'))].join('\n');
       }, [samples]);
 
-      // Fetch available datasets on mount
-      useEffect(() => {
-        const fetchDatasets = async () => {
-          try {
-            const response = await fetch(`${API_BASE}/api/fastqs`);
-            if (response.ok) {
-              const data = await response.json();
-              setAvailableDatasets(data.datasets || []);
-              setFastqPrefixes(data.prefixes || []);
-            }
-          } catch (error) {
-            console.warn('Failed to fetch datasets:', error);
-          }
-        };
-        fetchDatasets();
-      }, []);
-
-      // Fetch FASTQ prefixes when selected datasets change
-      useEffect(() => {
-        const fetchPrefixes = async () => {
-          if (selectedDatasets.length === 0) {
-            // If no datasets selected, show all prefixes
-            try {
-              const response = await fetch(`${API_BASE}/api/fastqs`);
-              if (response.ok) {
-                const data = await response.json();
-                setFastqPrefixes(data.prefixes || []);
-              }
-            } catch (error) {
-              console.warn('Failed to fetch prefixes:', error);
-            }
-            return;
-          }
-          try {
-            const response = await fetch(`${API_BASE}/api/fastqs?datasets=${selectedDatasets.join(',')}`);
-            if (response.ok) {
-              const data = await response.json();
-              setFastqPrefixes(data.prefixes || []);
-            }
-          } catch (error) {
-            console.warn('Failed to fetch prefixes:', error);
-          }
-        };
-        fetchPrefixes();
-      }, [selectedDatasets]);
-
-      // Validate FASTQ prefix with debounce
-      useEffect(() => {
-        if (!currentSample.File_Prefix || !currentSample.Dataset) {
-          setFastqValidation({});
-          return;
-        }
-        const timer = setTimeout(async () => {
-          try {
-            const response = await fetch(
-              `${API_BASE}/api/validate-fastq?prefix=${encodeURIComponent(currentSample.File_Prefix)}&dataset=${encodeURIComponent(currentSample.Dataset)}`
-            );
-            if (response.ok) {
-              const data = await response.json();
-              setFastqValidation(data);
-            }
-          } catch (error) {
-            console.warn('Failed to validate FASTQ:', error);
-          }
-        }, 500);
-        return () => clearTimeout(timer);
-      }, [currentSample.File_Prefix, currentSample.Dataset]);
-
-      // Pre-fill from persisted values when form resets
-      useEffect(() => {
-        if (editingId === null && (persistedDataset || persistedPatient)) {
-          setCurrentSample(prev => ({
-            ...prev,
-            Dataset: prev.Dataset || persistedDataset,
-            Patient_Name: prev.Patient_Name || persistedPatient
-          }));
-        }
-      }, [editingId, persistedDataset, persistedPatient]);
-
       useEffect(() => {
         if (samples.length === 0) return;
         const autoSave = async () => {
@@ -277,34 +176,6 @@
         const interval = setInterval(autoSave, 5000);
         return () => clearInterval(interval);
       }, [samples, selectedWorkflow, currentSample]);
-
-      // Validate FASTQ existence for all samples in the table
-      useEffect(() => {
-        const validateAllSamples = async () => {
-          const validations = {};
-          for (const sample of samples) {
-            if (sample.File_Prefix && sample.Dataset) {
-              try {
-                const response = await fetch(
-                  `${API_BASE}/api/validate-fastq?prefix=${encodeURIComponent(sample.File_Prefix)}&dataset=${encodeURIComponent(sample.Dataset)}`
-                );
-                if (response.ok) {
-                  const data = await response.json();
-                  validations[sample.id] = data;
-                }
-              } catch (error) {
-                console.warn('Failed to validate FASTQ for sample:', sample.id, error);
-              }
-            }
-          }
-          setSampleFastqValidation(validations);
-        };
-        if (samples.length > 0) {
-          validateAllSamples();
-        } else {
-          setSampleFastqValidation({});
-        }
-      }, [samples]);
 
       const saveToRaft = async () => {
         if (samples.length === 0) { alert('No samples to save. Please add samples first.'); return; }
@@ -328,7 +199,7 @@
           setTimeout(() => { window.close(); }, 1500);
         } catch (error) {
           console.error('Save failed:', error);
-          setSaveStatus('Save failed. Please try again.');
+          setSaveStatus('RAFT CLI not connected. Use Download button instead.');
           setIsSaving(false);
         }
       };
@@ -346,13 +217,35 @@
         URL.revokeObjectURL(url);
       };
 
+      const copyForCLI = async () => {
+        if (samples.length === 0) { alert('No samples to copy. Please add samples first.'); return; }
+        const tsv = generateTSV();
+        try {
+          // Compress with pako (gzip)
+          const compressed = pako.gzip(tsv);
+          // Base64 encode
+          const base64 = btoa(String.fromCharCode.apply(null, compressed));
+          const encoded = `RAFT1:manifest:${base64}`;
+          await navigator.clipboard.writeText(encoded);
+          alert('Copied! Paste this code into the RAFT CLI.');
+        } catch (error) {
+          console.error('Copy failed:', error);
+          // Fallback: show in a dialog for manual copy
+          const tsv = generateTSV();
+          const compressed = pako.gzip(tsv);
+          const base64 = btoa(String.fromCharCode.apply(null, compressed));
+          const encoded = `RAFT1:manifest:${base64}`;
+          prompt('Copy this code and paste it into the RAFT CLI:', encoded);
+        }
+      };
+
       const validateCurrentSample = () => {
         const errors = [];
         if (!currentSample.Patient_Name) errors.push('Patient Name required');
         if (!currentSample.Run_Name) {
           errors.push('Run Name required');
         } else if (!currentSample.Run_Name.match(/^(ad|nd|ar|nr)[-_]/i)) {
-          errors.push('Please select a Sample Type');
+          errors.push('Run Name must start with ad-, nd-, ar-, or nr-');
         } else {
           const duplicateRunName = samples.find(s =>
             s.id !== editingId && s.Patient_Name === currentSample.Patient_Name && s.Run_Name === currentSample.Run_Name
@@ -430,54 +323,8 @@
           const newId = samples.length > 0 ? Math.max(...samples.map(s => s.id)) + 1 : 1;
           setSamples([...samples, { ...sampleToAdd, id: newId }]);
         }
-        // Persist dataset and patient for next sample entry
-        setPersistedDataset(currentSample.Dataset);
-        setPersistedPatient(currentSample.Patient_Name);
         setShowValidationErrors(false);
-        setShowPrefixDropdown(false);
-        setPrefixFilter('');
-        setFastqValidation({});
         setCurrentSample({ Patient_Name: '', Run_Name: '', Dataset: '', File_Prefix: '', Sequencing_Method: 'WES', Group: '', MHC_Alleles: '' });
-      };
-
-      // Handle prefix selection from autocomplete dropdown
-      const handlePrefixSelect = (prefix) => {
-        setCurrentSample(prev => ({
-          ...prev,
-          File_Prefix: prefix.prefix,
-          Dataset: prefix.dataset
-        }));
-        setShowPrefixDropdown(false);
-        setPrefixFilter('');
-      };
-
-      // Filter prefixes based on input
-      const getFilteredPrefixes = () => {
-        const filter = (prefixFilter || currentSample.File_Prefix || '').toLowerCase();
-        if (!filter) return fastqPrefixes.slice(0, 20);
-        return fastqPrefixes.filter(p =>
-          p.prefix.toLowerCase().includes(filter) ||
-          p.display.toLowerCase().includes(filter)
-        ).slice(0, 20);
-      };
-
-      // Toggle dataset selection for filtering
-      const toggleDatasetSelection = (dataset) => {
-        setSelectedDatasets(prev =>
-          prev.includes(dataset)
-            ? prev.filter(d => d !== dataset)
-            : [...prev, dataset]
-        );
-      };
-
-      // Select all datasets
-      const selectAllDatasets = () => {
-        setSelectedDatasets(availableDatasets);
-      };
-
-      // Clear dataset selection
-      const clearDatasetSelection = () => {
-        setSelectedDatasets([]);
       };
 
       const editSample = (sample) => {
@@ -494,22 +341,6 @@
       const applyPrefix = (prefix) => {
         const identifier = currentSample.Run_Name.replace(/^(ad-|nd-|ar-|nr-)/i, '');
         setCurrentSample({ ...currentSample, Run_Name: prefix + identifier });
-      };
-
-      // Get current prefix and identifier from Run_Name
-      const runNameParts = getRunNameParts(currentSample.Run_Name);
-
-      // Handle sample type change - updates Run_Name prefix
-      const handleSampleTypeChange = (newPrefix) => {
-        const currentParts = getRunNameParts(currentSample.Run_Name);
-        setCurrentSample({ ...currentSample, Run_Name: newPrefix + currentParts.identifier });
-      };
-
-      // Handle identifier change - preserves prefix
-      const handleIdentifierChange = (newIdentifier) => {
-        const currentParts = getRunNameParts(currentSample.Run_Name);
-        const prefix = currentParts.prefix || 'ad-'; // Default to ad- if no prefix
-        setCurrentSample({ ...currentSample, Run_Name: prefix + newIdentifier });
       };
 
       const importFromTSV = (e) => {
@@ -572,10 +403,16 @@
                   <button onClick={downloadManifest} className="px-3 py-2 text-sm bg-gray-600 text-white rounded-md hover:bg-gray-700 transition flex items-center gap-2">
                     <Download size={16} /> Download
                   </button>
-                  <button onClick={saveToRaft} disabled={isSaving || samples.length === 0}
-                    className={`px-3 py-2 text-sm rounded-md transition flex items-center gap-2 ${isSaving || samples.length === 0 ? 'bg-green-400 cursor-not-allowed' : 'bg-green-600 hover:bg-green-700'} text-white`}>
-                    <CheckCircle size={16} /> {isSaving ? 'Saving...' : 'Save to RAFT'}
-                  </button>
+                  {IS_LOCAL ? (
+                    <button onClick={saveToRaft} disabled={isSaving || samples.length === 0}
+                      className={`px-3 py-2 text-sm rounded-md transition flex items-center gap-2 ${isSaving || samples.length === 0 ? 'bg-green-400 cursor-not-allowed' : 'bg-green-600 hover:bg-green-700'} text-white`}>
+                      <CheckCircle size={16} /> {isSaving ? 'Saving...' : 'Save to RAFT'}
+                    </button>
+                  ) : (
+                    <button onClick={copyForCLI} className="px-3 py-2 text-sm bg-green-600 text-white rounded-md hover:bg-green-700 transition flex items-center gap-2">
+                      <Copy size={16} /> Copy to CLI
+                    </button>
+                  )}
                 </div>
               </div>
             </div>
@@ -589,49 +426,15 @@
               </select>
             </div>
 
-            {availableDatasets.length > 0 && (
-              <div className="bg-white rounded-lg shadow-md p-4 md:p-6">
-                <div className="flex items-center justify-between mb-2">
-                  <label className="block text-base font-semibold text-gray-800">Filter FASTQs by Dataset</label>
-                  <div className="flex gap-2">
-                    <button onClick={selectAllDatasets} className="text-xs text-blue-600 hover:text-blue-800">Select All</button>
-                    <span className="text-gray-300">|</span>
-                    <button onClick={clearDatasetSelection} className="text-xs text-gray-600 hover:text-gray-800">Clear</button>
-                  </div>
-                </div>
-                <p className="text-xs text-gray-500 mb-3">Select datasets to filter FASTQ autocomplete suggestions</p>
-                <div className="flex flex-wrap gap-2">
-                  {availableDatasets.map(dataset => (
-                    <button
-                      key={dataset}
-                      onClick={() => toggleDatasetSelection(dataset)}
-                      className={`px-3 py-1.5 text-xs rounded-full border transition ${
-                        selectedDatasets.includes(dataset)
-                          ? 'bg-indigo-600 text-white border-indigo-600'
-                          : 'bg-white text-gray-700 border-gray-300 hover:border-indigo-400'
-                      }`}
-                    >
-                      {dataset}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            )}
-
             <div className="bg-white rounded-lg shadow-md p-4 md:p-6">
               <h3 className="text-base font-semibold text-gray-700 mb-3">{editingId !== null ? 'Edit Sample' : 'Add a Sample'}</h3>
               {showValidationErrors && currentErrors.length > 0 && (
-                <div className="bg-red-50 border border-red-200 rounded-lg p-3 mb-4 flex items-start gap-2">
-                  <AlertCircle className="text-red-600 flex-shrink-0 mt-0.5" size={18} />
-                  <div className="text-sm text-red-800">{currentErrors.map((err, i) => <div key={i}>{err}</div>)}</div>
+                <div className="bg-red-50 border border-red-200 rounded-md p-2 mb-3 flex items-start gap-2">
+                  <AlertCircle className="text-red-600 flex-shrink-0 mt-0.5" size={16} />
+                  <div className="text-xs text-red-800">{currentErrors.map((err, i) => <div key={i}>{err}</div>)}</div>
                 </div>
               )}
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-                <div>
-                  <label className="block text-xs font-medium text-gray-700 mb-1">Dataset * <InfoTooltip text="Dataset identifier for grouping samples. This should match a subdirectory in your RAFT fastqs/ directory." /></label>
-                  <input type="text" value={currentSample.Dataset} onChange={(e) => setCurrentSample({ ...currentSample, Dataset: e.target.value })}
-                    placeholder="e.g., MyDataset" className="w-full px-2 py-1.5 text-sm border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500" />
-                </div>
                 <div>
                   <label className="block text-xs font-medium text-gray-700 mb-1">
                     Patient Name *
@@ -642,105 +445,43 @@
                 </div>
                 <div>
                   <label className="block text-xs font-medium text-gray-700 mb-1">
-                    Sample Type *
-                    <InfoTooltip text={`Select the type of sample:\n\n• Tumor DNA - Abnormal/cancer DNA (prefix: ad-)\n• Normal DNA - Healthy tissue DNA (prefix: nd-)\n• Tumor RNA - Abnormal/cancer RNA (prefix: ar-)\n• Normal RNA - Healthy tissue RNA (prefix: nr-)\n\nThis determines the Run Name prefix.`} />
-                  </label>
-                  <select
-                    value={runNameParts.prefix || ''}
-                    onChange={(e) => handleSampleTypeChange(e.target.value)}
-                    className="w-full px-2 py-1.5 text-sm border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 bg-white"
-                  >
-                    <option value="">Select sample type...</option>
-                    {sampleTypeOptions.map(opt => (
-                      <option key={opt.value} value={opt.value}>{opt.label}</option>
-                    ))}
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-gray-700 mb-1">
                     Run Name *
-                    <InfoTooltip text={`The Run Name combines the sample type prefix with a unique identifier.\n\nThe prefix is set by Sample Type:\n• ad- = Tumor DNA\n• nd- = Normal DNA\n• ar- = Tumor RNA\n• nr- = Normal RNA\n\nExample: ad-Pt01-03A`} />
+                    <InfoTooltip text={`Format: prefix-identifier\n\nPrefix options:\n• ad- = Abnormal (tumor) DNA\n• nd- = Normal DNA\n• ar- = Abnormal (tumor) RNA\n• nr- = Normal RNA\n\nExample: ad-Pt01-03A`} />
                   </label>
-                  <div className="flex">
-                    <select
-                      value={runNameParts.prefix || ''}
-                      onChange={(e) => handleSampleTypeChange(e.target.value)}
-                      className="px-2 py-1.5 text-sm border border-r-0 border-gray-300 rounded-l-md bg-gray-50 font-mono min-w-[4rem] focus:ring-2 focus:ring-blue-500"
-                    >
-                      <option value="">--</option>
+                  <div className="flex gap-1">
+                    <select onChange={(e) => applyPrefix(e.target.value)} className="px-1.5 py-1.5 border border-gray-300 rounded-l-md bg-gray-50 text-xs">
+                      <option value="">Prefix</option>
                       <option value="ad-">ad-</option>
                       <option value="nd-">nd-</option>
                       <option value="ar-">ar-</option>
                       <option value="nr-">nr-</option>
                     </select>
-                    <input
-                      type="text"
-                      value={runNameParts.identifier}
-                      onChange={(e) => handleIdentifierChange(e.target.value)}
-                      placeholder="e.g., Pt01-03A"
-                      className="flex-1 px-2 py-1.5 text-sm border border-gray-300 rounded-r-md focus:ring-2 focus:ring-blue-500"
-                    />
+                    <input type="text" value={currentSample.Run_Name} onChange={(e) => setCurrentSample({ ...currentSample, Run_Name: e.target.value })}
+                      placeholder="e.g., ad-Pt01-03A" className="flex-1 px-2 py-1.5 text-sm border border-gray-300 rounded-r-md focus:ring-2 focus:ring-blue-500" />
                   </div>
-                  {!runNameParts.prefix && runNameParts.identifier && (
-                    <div className="mt-1 text-xs text-amber-600 flex items-center gap-1">
-                      <AlertCircle size={12} />
-                      Select a Sample Type to set the Run Name prefix
-                    </div>
-                  )}
                 </div>
-                <div className="relative">
+                <div>
+                  <label className="block text-xs font-medium text-gray-700 mb-1">Sample Type <InfoTooltip text="Determined by Run Name prefix" /></label>
+                  <div className="w-full px-2 py-1.5 border border-gray-200 rounded-md bg-gray-50 text-sm">
+                    {currentSampleType ? <span className={`font-medium ${currentSampleType.isNormal ? 'text-green-700' : 'text-purple-700'}`}>{currentSampleType.type}</span> : <span className="text-gray-400">Determined by Run Name</span>}
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray-700 mb-1">Dataset * <InfoTooltip text="Dataset identifier for grouping samples" /></label>
+                  <input type="text" value={currentSample.Dataset} onChange={(e) => setCurrentSample({ ...currentSample, Dataset: e.target.value })}
+                    placeholder="e.g., MyDataset" className="w-full px-2 py-1.5 text-sm border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500" />
+                </div>
+                <div>
                   <label className="block text-xs font-medium text-gray-700 mb-1">
                     File Prefix *
-                    <InfoTooltip text={`FASTQ base name without read number or extension.\n\nExample: For files named sample_1.fastq.gz and sample_2.fastq.gz, use 'sample'\n\nEnsure FASTQs are available in your RAFT fastqs/ directory.\n\nStart typing to see autocomplete suggestions from your RAFT fastqs directory.`} />
+                    <InfoTooltip text={`FASTQ base name without read number or extension.\n\nExample: For files named sample_1.fastq.gz and sample_2.fastq.gz, use 'sample'\n\nEnsure FASTQs are available in your RAFT fastqs/ directory.`} />
                   </label>
-                  <input
-                    type="text"
-                    value={currentSample.File_Prefix}
-                    onChange={(e) => {
-                      setCurrentSample({ ...currentSample, File_Prefix: e.target.value });
-                      setPrefixFilter(e.target.value);
-                      setShowPrefixDropdown(true);
-                    }}
-                    onFocus={() => setShowPrefixDropdown(true)}
-                    onBlur={() => setTimeout(() => setShowPrefixDropdown(false), 200)}
-                    placeholder="e.g., sample (type to search)"
-                    className="w-full px-2 py-1.5 text-sm border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500"
-                  />
-                  {showPrefixDropdown && fastqPrefixes.length > 0 && (
-                    <div className="absolute z-50 w-full mt-1 bg-white border border-gray-300 rounded-md shadow-lg max-h-48 overflow-y-auto">
-                      {getFilteredPrefixes().length > 0 ? (
-                        getFilteredPrefixes().map((prefix, idx) => (
-                          <div
-                            key={`${prefix.dataset}-${prefix.prefix}-${idx}`}
-                            className="px-3 py-2 text-sm hover:bg-indigo-50 cursor-pointer border-b border-gray-100 last:border-b-0"
-                            onMouseDown={(e) => {
-                              e.preventDefault();
-                              handlePrefixSelect(prefix);
-                            }}
-                          >
-                            <div className="font-medium text-gray-800">{prefix.prefix}</div>
-                            <div className="text-xs text-gray-500">Dataset: {prefix.dataset}</div>
-                          </div>
-                        ))
-                      ) : (
-                        <div className="px-3 py-2 text-sm text-gray-500">No matching FASTQs found</div>
-                      )}
-                    </div>
-                  )}
+                  <input type="text" value={currentSample.File_Prefix} onChange={(e) => setCurrentSample({ ...currentSample, File_Prefix: e.target.value })}
+                    placeholder="e.g., sample" className="w-full px-2 py-1.5 text-sm border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500" />
                   {filePrefixWarning && (
                     <div className="bg-yellow-50 border border-yellow-200 rounded-md p-2 mt-1 flex items-start gap-2">
                       <AlertCircle className="text-yellow-600 flex-shrink-0 mt-0.5" size={14} />
                       <div className="text-xs text-yellow-900">{filePrefixWarning}</div>
-                    </div>
-                  )}
-                  {currentSample.File_Prefix && currentSample.Dataset && fastqValidation.exists === false && (
-                    <div className="bg-orange-50 border border-orange-200 rounded-md p-2 mt-1 flex items-start gap-2">
-                      <AlertCircle className="text-orange-600 flex-shrink-0 mt-0.5" size={14} />
-                      <div className="text-xs text-orange-900">
-                        FASTQ files not found for "{currentSample.File_Prefix}" in dataset "{currentSample.Dataset}".
-                        <span className="block mt-1">Copy or symlink the FASTQ files to your RAFT fastqs/{currentSample.Dataset}/ directory before starting the project.</span>
-                        {fastqValidation.error && <span className="block mt-1">{fastqValidation.error}</span>}
-                      </div>
                     </div>
                   )}
                 </div>
@@ -812,17 +553,7 @@
                                               <div className="text-sm font-medium text-gray-800">{s.Run_Name}</div>
                                               {sampleType && <div className={`text-xs mt-1 ${sampleType.isNormal ? 'text-green-600' : 'text-purple-600'}`}>{sampleType.type}</div>}
                                               <div className="text-xs text-gray-500 mt-1">{s.Sequencing_Method}</div>
-                                              <div className="text-xs text-gray-400 mt-1 flex items-center gap-1">
-                                                File Prefix: {s.File_Prefix}
-                                                {sampleFastqValidation[s.id]?.exists === false && (
-                                                  <div className="relative inline-block group">
-                                                    <AlertCircle size={12} className="text-orange-500 cursor-help" />
-                                                    <div className="absolute z-50 hidden group-hover:block w-64 p-2 text-xs bg-orange-100 border border-orange-300 text-orange-900 rounded shadow-lg bottom-full left-0 mb-1 whitespace-normal">
-                                                      FASTQ files not found in {s.Dataset}/. Copy or symlink them to your RAFT fastqs/{s.Dataset}/ directory before starting the project.
-                                                    </div>
-                                                  </div>
-                                                )}
-                                              </div>
+                                              <div className="text-xs text-gray-400 mt-1">File Prefix: {s.File_Prefix}</div>
                                             </div>
                                             <div className="flex gap-1 ml-2">
                                               <button onClick={() => editSample(s)} className="text-blue-600 hover:text-blue-800" title="Edit sample"><Edit2 size={14} /></button>
