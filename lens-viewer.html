@@ -67,6 +67,50 @@
 
     const visMetrics = ['priority_score_maximum', 'priority_score_mhcflurry', 'mhcflurry_2.1.1.aff', 'ccf', 'vaf', 'tpm'];
 
+    const TCGA_TUMOR_TYPES = [
+      { code: 'ACC', label: 'Adrenocortical carcinoma' },
+      { code: 'BLCA', label: 'Bladder urothelial carcinoma' },
+      { code: 'BRCA', label: 'Breast invasive carcinoma' },
+      { code: 'CESC', label: 'Cervical squamous cell carcinoma and endocervical adenocarcinoma' },
+      { code: 'CHOL', label: 'Cholangiocarcinoma' },
+      { code: 'COAD', label: 'Colon adenocarcinoma' },
+      { code: 'DLBC', label: 'Diffuse large B-cell lymphoma' },
+      { code: 'ESCA', label: 'Esophageal carcinoma' },
+      { code: 'GBM', label: 'Glioblastoma multiforme' },
+      { code: 'HNSC', label: 'Head and neck squamous cell carcinoma' },
+      { code: 'KICH', label: 'Kidney chromophobe' },
+      { code: 'KIRC', label: 'Kidney renal clear cell carcinoma' },
+      { code: 'KIRP', label: 'Kidney renal papillary cell carcinoma' },
+      { code: 'LAML', label: 'Acute myeloid leukemia' },
+      { code: 'LGG', label: 'Lower grade glioma' },
+      { code: 'LIHC', label: 'Liver hepatocellular carcinoma' },
+      { code: 'LUAD', label: 'Lung adenocarcinoma' },
+      { code: 'LUSC', label: 'Lung squamous cell carcinoma' },
+      { code: 'MESO', label: 'Mesothelioma' },
+      { code: 'OV', label: 'Ovarian serous cystadenocarcinoma' },
+      { code: 'PAAD', label: 'Pancreatic adenocarcinoma' },
+      { code: 'PCPG', label: 'Pheochromocytoma and paraganglioma' },
+      { code: 'PRAD', label: 'Prostate adenocarcinoma' },
+      { code: 'READ', label: 'Rectum adenocarcinoma' },
+      { code: 'SARC', label: 'Sarcoma' },
+      { code: 'SKCM', label: 'Skin cutaneous melanoma' },
+      { code: 'STAD', label: 'Stomach adenocarcinoma' },
+      { code: 'TGCT', label: 'Testicular germ cell tumors' },
+      { code: 'THCA', label: 'Thyroid carcinoma' },
+      { code: 'THYM', label: 'Thymoma' },
+      { code: 'UCEC', label: 'Uterine corpus endometrial carcinoma' },
+      { code: 'UCS', label: 'Uterine carcinosarcoma' },
+      { code: 'UVM', label: 'Uveal melanoma' },
+    ];
+
+    const TUMOR_SUBTYPES = {
+      BRCA: ['Luminal A', 'Luminal B', 'HER2-enriched', 'Basal-like'],
+      LUAD: ['TRU', 'Proximal-inflammatory', 'Proximal-proliferative'],
+      LUSC: ['Basal', 'Classical', 'Primitive', 'Secretory'],
+      GBM: ['Classical', 'Mesenchymal', 'Neural', 'Proneural'],
+      SKCM: ['BRAF-mutant', 'NRAS-mutant', 'NF1-mutant', 'Triple wild-type'],
+    };
+
     // Main Component
     const LENSViewer = () => {
       const [patients, setPatients] = useState({});
@@ -87,6 +131,8 @@
       const [patientSortMetrics, setPatientSortMetrics] = useState({});
       const [isPreloading, setIsPreloading] = useState(false);
       const [preloadError, setPreloadError] = useState('');
+      const [selectedTumorType, setSelectedTumorType] = useState('BRCA');
+      const [selectedTumorSubtype, setSelectedTumorSubtype] = useState('');
       const [showPasteModal, setShowPasteModal] = useState(false);
       const [pasteData, setPasteData] = useState('');
       const [pasteError, setPasteError] = useState('');
@@ -214,6 +260,7 @@
           const values = lines[i].split('\t');
           const row = {};
           headers.forEach((header, idx) => { row[header] = values[idx]; });
+          row._source_file = filename;
           data.push(row);
         }
 
@@ -343,6 +390,134 @@
         };
         loadQcData();
       }, []);
+
+      // Upgrade patients to multi-group when QC data detects groups (no manifest needed)
+      useEffect(() => {
+        if (!qcData?.summaries || Object.keys(patients).length === 0) return;
+
+        let updated = false;
+        const newPatients = { ...patients };
+
+        for (const [patientId, patient] of Object.entries(newPatients)) {
+          if (patient.isMultiGroup) continue; // Already multi-group
+
+          const summary = qcData.summaries[patientId];
+          if (!summary?.groups || summary.groups.length < 2) continue;
+
+          const qcGroups = summary.groups;
+          const groupIds = qcGroups.map(g => g.id);
+
+          // Build run_name -> [group_ids] mapping from QC summary
+          const runToGroups = {};
+          for (const sample of summary.samples || []) {
+            if (sample.group) {
+              runToGroups[sample.run_dir] = [sample.group];
+            } else {
+              // Shared sample - belongs to all groups
+              runToGroups[sample.run_dir] = [...groupIds];
+            }
+          }
+          // Also map multi-sample run dirs
+          for (const ms of summary.multi_sample || []) {
+            if (ms.group) {
+              // Each component run also maps to this group
+              for (const part of ms.run_dir.split('+')) {
+                if (!runToGroups[part]) {
+                  runToGroups[part] = [ms.group];
+                } else if (!runToGroups[part].includes(ms.group)) {
+                  runToGroups[part].push(ms.group);
+                }
+              }
+            }
+          }
+
+          // Initialize group data
+          const groupData = {};
+          for (const gid of groupIds) {
+            groupData[gid] = {
+              files: [], data: [], alleles: new Set(),
+              alleleSupport: {}, antigenSources: new Set(),
+            };
+          }
+
+          // Partition files and rows into groups using _source_file tag
+          for (const row of (patient.data || [])) {
+            const filename = row._source_file;
+            if (!filename) continue;
+            const runNames = extractRunNamesFromFilename(filename);
+
+            // File belongs to group if ALL its run names belong to that group
+            const fileGroupIds = groupIds.filter(gid =>
+              runNames.every(rn => {
+                const rnGroups = runToGroups[rn];
+                return rnGroups && rnGroups.includes(gid);
+              })
+            );
+
+            for (const gid of fileGroupIds) {
+              groupData[gid].data.push(row);
+              if (row.allele) {
+                groupData[gid].alleles.add(row.allele);
+                if (!groupData[gid].alleleSupport[row.allele]) {
+                  groupData[gid].alleleSupport[row.allele] = {};
+                }
+                if (row.hla_allele_support) {
+                  row.hla_allele_support.split(';').forEach(support => {
+                    const [tool, sampleType] = support.split(':');
+                    if (tool && sampleType) {
+                      if (!groupData[gid].alleleSupport[row.allele][tool]) {
+                        groupData[gid].alleleSupport[row.allele][tool] = new Set();
+                      }
+                      groupData[gid].alleleSupport[row.allele][tool].add(sampleType);
+                    }
+                  });
+                }
+              }
+              if (row.antigen_source) {
+                groupData[gid].antigenSources.add(row.antigen_source);
+              }
+            }
+          }
+
+          // Track files per group
+          for (const filename of (patient.files || [])) {
+            const runNames = extractRunNamesFromFilename(filename);
+            const fileGroupIds = groupIds.filter(gid =>
+              runNames.every(rn => {
+                const rnGroups = runToGroups[rn];
+                return rnGroups && rnGroups.includes(gid);
+              })
+            );
+            for (const gid of fileGroupIds) {
+              groupData[gid].files.push(filename);
+            }
+          }
+
+          // Upgrade patient
+          newPatients[patientId] = {
+            ...patient,
+            isMultiGroup: true,
+            groups: groupIds,
+            groupLabels: Object.fromEntries(qcGroups.map(g => [g.id, g.label])),
+            groupData,
+          };
+          updated = true;
+        }
+
+        if (updated) {
+          setPatients(newPatients);
+          // Auto-select first group if current patient was upgraded
+          const current = newPatients[selectedPatient];
+          if (current?.isMultiGroup && (!selectedGroup || selectedGroup === null)) {
+            setSelectedGroup(current.groups[0]);
+            const gd = current.groupData[current.groups[0]];
+            if (gd) {
+              setSelectedAlleles(new Set(gd.alleles));
+              setSelectedAntigenSources(new Set(gd.antigenSources));
+            }
+          }
+        }
+      }, [qcData, Object.keys(patients).length]);
 
       // Extract run names from filename (separated by '+')
       const extractRunNamesFromFilename = (filename) => {
@@ -732,6 +907,8 @@
                     topN={topN} setTopN={setTopN}
                     sortMetric={sortMetric} setSortMetric={setSortMetric}
                     globalFormula={globalFormula} setGlobalFormula={setGlobalFormula}
+                    selectedTumorType={selectedTumorType} setSelectedTumorType={setSelectedTumorType}
+                    selectedTumorSubtype={selectedTumorSubtype} setSelectedTumorSubtype={setSelectedTumorSubtype}
                   />
                 </div>
               ) : viewMode === 'cohort-qc' ? (
@@ -739,7 +916,7 @@
                   <CohortQCView qcData={qcData} patients={patients} manifestData={manifestData} />
                 </div>
               ) : (
-                <div className="flex flex-col flex-1 min-h-0">
+                <div className="flex flex-col flex-1 min-h-0 overflow-y-auto">
                   {/* Patient-level tabs: pMHC vs QC */}
                   <div className="flex-shrink-0 mb-4 sticky top-0 z-10 bg-gray-50 -mx-4 md:-mx-6 px-4 md:px-6 pt-1 pb-2">
                     <div className="flex border-b border-gray-200">
@@ -768,7 +945,7 @@
 
                   {patientTab === 'pmhc' ? (
                   <React.Fragment>
-                  {/* Group sub-tabs for multi-group patients */}
+                  {/* Group sub-tabs for multi-group patients (manifest or QC-detected groups) */}
                   {patients[selectedPatient]?.isMultiGroup && (
                     <div className="flex-shrink-0 mb-3">
                       <div className="flex flex-wrap gap-1 bg-gray-100 p-1 rounded-lg">
@@ -790,7 +967,7 @@
                             }`}
                           >
                             <Icon name="folder" size={14} className="inline mr-1" />
-                            {group}
+                            {patients[selectedPatient].groupLabels?.[group] || group}
                             <span className="text-xs text-gray-400 ml-1">
                               ({patients[selectedPatient].groupData[group]?.data.length || 0})
                             </span>
@@ -849,7 +1026,7 @@
                   </div>
                   {/* Split panel: Visualizations on left, pMHC cards on right */}
                   {/* On small screens: tabs to switch views. On large screens: sticky sidebar + flowing cards */}
-                  <div className="flex flex-col lg:flex-row lg:items-start gap-4">
+                  <div className="flex flex-col lg:flex-row gap-4">
                     {/* Mobile/Tablet: View toggle tabs */}
                     <div className="lg:hidden flex border-b border-gray-200 mb-2">
                       <button
@@ -902,6 +1079,8 @@
                           selectedRow={selectedRow}
                           setSelectedRow={setSelectedRow}
                           hasCustomFormula={!!(getActiveFormula() && getActiveFormula().trim())}
+                          tumorType={selectedTumorType}
+                          tumorSubtype={selectedTumorSubtype}
                         />
                       </div>
                     </div>
@@ -1063,7 +1242,7 @@
                           }`}
                         >
                           <Icon name="folder" size={14} className="inline mr-1" />
-                          {group}
+                          {patient.groupLabels?.[group] || group}
                           <span className="text-xs text-gray-400 ml-1">
                             ({patient.groupData[group]?.data.length || 0})
                           </span>
@@ -1092,7 +1271,13 @@
     };
 
     // Global Settings Component
-    const GlobalSettings = ({ topN, setTopN, sortMetric, setSortMetric, globalFormula, setGlobalFormula }) => (
+    const GlobalSettings = ({
+      topN, setTopN,
+      sortMetric, setSortMetric,
+      globalFormula, setGlobalFormula,
+      selectedTumorType, setSelectedTumorType,
+      selectedTumorSubtype, setSelectedTumorSubtype,
+    }) => (
       <div className="max-w-4xl">
         <h2 className="text-xl font-bold text-gray-900 mb-4">Global Settings</h2>
         <div className="bg-white rounded-lg shadow-md p-4 md:p-6">
@@ -1115,6 +1300,49 @@
               >
                 {priorityMetrics.map(m => <option key={m.value} value={m.value}>{m.label}</option>)}
               </select>
+            </div>
+          </div>
+          <div className="mb-6 rounded-lg border border-gray-200 bg-gray-50 p-4">
+            <h3 className="text-sm font-semibold text-gray-800 mb-2">Evidence Context</h3>
+            <p className="text-xs text-gray-600 mb-3">
+              Select a tumor type (and optional subtype) to contextualize fusion evidence and external annotations.
+            </p>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <div>
+                <label className="block text-xs font-medium text-gray-700 mb-1">TCGA Tumor Type</label>
+                <select
+                  value={selectedTumorType}
+                  onChange={(e) => { setSelectedTumorType(e.target.value); setSelectedTumorSubtype(''); }}
+                  className="w-full px-2 py-1.5 text-sm border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white"
+                >
+                  {TCGA_TUMOR_TYPES.map(type => (
+                    <option key={type.code} value={type.code}>{type.code} — {type.label}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-700 mb-1">Tumor Subtype (Optional)</label>
+                {TUMOR_SUBTYPES[selectedTumorType] ? (
+                  <select
+                    value={selectedTumorSubtype}
+                    onChange={(e) => setSelectedTumorSubtype(e.target.value)}
+                    className="w-full px-2 py-1.5 text-sm border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white"
+                  >
+                    <option value="">Any subtype</option>
+                    {TUMOR_SUBTYPES[selectedTumorType].map(subtype => (
+                      <option key={subtype} value={subtype}>{subtype}</option>
+                    ))}
+                  </select>
+                ) : (
+                  <input
+                    type="text"
+                    value={selectedTumorSubtype}
+                    onChange={(e) => setSelectedTumorSubtype(e.target.value)}
+                    placeholder="Optional"
+                    className="w-full px-2 py-1.5 text-sm border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  />
+                )}
+              </div>
             </div>
           </div>
           <div>
@@ -3099,21 +3327,52 @@
     };
 
     // pMHC Cards Component
-    const PMHCCards = ({ data, sortMetric, comments, setComments, selectedRow, setSelectedRow, hasCustomFormula }) => (
+    const PMHCCards = ({ data, sortMetric, comments, setComments, selectedRow, setSelectedRow, hasCustomFormula, tumorType, tumorSubtype }) => (
       <div className="mt-4">
         <h3 className="text-base font-semibold text-gray-800 mb-4">Top {data.length} pMHCs</h3>
         <div className="grid gap-3">
           {data.map((row, idx) => (
-            <PMHCCard key={`${row.peptide}-${row.allele}-${idx}`} row={row} idx={idx} sortMetric={sortMetric} comments={comments} setComments={setComments} isSelected={selectedRow?.peptide === row.peptide && selectedRow?.allele === row.allele} onSelect={() => setSelectedRow(row)} hasCustomFormula={hasCustomFormula} />
+            <PMHCCard key={`${row.peptide}-${row.allele}-${idx}`} row={row} idx={idx} sortMetric={sortMetric} comments={comments} setComments={setComments} isSelected={selectedRow?.peptide === row.peptide && selectedRow?.allele === row.allele} onSelect={() => setSelectedRow(row)} hasCustomFormula={hasCustomFormula} tumorType={tumorType} tumorSubtype={tumorSubtype} />
           ))}
         </div>
       </div>
     );
 
+    const parseJsonField = (value) => {
+      if (!value) return null;
+      if (typeof value === 'object') return value;
+      try {
+        return JSON.parse(value);
+      } catch (err) {
+        return null;
+      }
+    };
+
+    const formatList = (value) => {
+      if (!value) return 'N/A';
+      if (Array.isArray(value)) return value.join(', ');
+      return String(value);
+    };
+
     // pMHC Card Component
-    const PMHCCard = ({ row, idx, sortMetric, comments, setComments, isSelected, onSelect, hasCustomFormula }) => {
+    const PMHCCard = ({ row, idx, sortMetric, comments, setComments, isSelected, onSelect, hasCustomFormula, tumorType, tumorSubtype }) => {
       const key = `${row.peptide}-${row.allele}`;
       const displayValue = (v) => { if (v === null || v === undefined || v === '' || v === 'NA') return 'N/A'; const num = parseFloat(v); return isNaN(num) ? 'N/A' : num.toFixed(3); };
+      const antigenSource = (row.antigen_source || '').toLowerCase();
+      const isSNV = antigenSource.includes('snv');
+      const isIndel = antigenSource.includes('indel');
+      const isFusion = antigenSource.includes('fusion');
+      const isCTA = antigenSource.includes('cta');
+      const snvEvidence = parseJsonField(row.snv_external_evidence);
+      const fusionEvidence = parseJsonField(row.fusion_evidence);
+      const ctaExpression = parseJsonField(row.cta_hpa_expression);
+      const fusionContext = (() => {
+        if (!fusionEvidence) return null;
+        const tumorData = fusionEvidence[tumorType];
+        if (!tumorData) return null;
+        const subtypeData = tumorSubtype && tumorData.subtypes ? tumorData.subtypes[tumorSubtype] : null;
+        return { tumorData, subtypeData };
+      })();
 
       return (
         <div onClick={onSelect} className={`bg-white rounded-lg p-4 cursor-pointer transition shadow-sm hover:shadow-md ${isSelected ? 'border-2 border-indigo-500 bg-indigo-50' : 'border border-gray-200'}`}>
@@ -3138,6 +3397,77 @@
             <MetricDisplay label="VAF" value={row.vaf} />
             <MetricDisplay label="Log2(TPM)" value={row.tpm} transform={v => { const num = parseFloat(v); return (!isNaN(num) && num > 0) ? Math.log2(num) : null; }} />
           </div>
+
+          {(isSNV || isIndel || isFusion || isCTA) && (
+            <div className="grid gap-3 mb-3">
+              {(isSNV || isIndel) && (
+                <div className="rounded-md border border-gray-200 bg-white p-3">
+                  <div className="text-sm font-semibold text-gray-800 mb-1">Genomic Context</div>
+                  <div className="text-xs text-gray-600 mb-1">
+                    {(row.chromosome || 'chr?') + ':' + (row.start || 'N/A') + '-' + (row.end || 'N/A')} &bull; {(row.ref || '?')}→{(row.alt || '?')}
+                  </div>
+                  <div className="text-xs text-gray-500">{row.gene_name || 'Unknown gene'} &bull; {row.protein_change || 'N/A'} &bull; {row.variant_type || 'variant'}</div>
+                  <div className="mt-2 pt-2 border-t border-dashed border-gray-200 text-xs text-gray-600 space-y-0.5">
+                    <div className="font-semibold text-gray-700">External Variant Evidence (Open Sources)</div>
+                    {snvEvidence ? (
+                      <>
+                        <div><span className="font-medium">Sources:</span> {formatList(snvEvidence.sources)}</div>
+                        <div><span className="font-medium">Tier:</span> {snvEvidence.tier || 'N/A'}</div>
+                        <div><span className="font-medium">Occurrences:</span> {snvEvidence.occurrences || 'N/A'}</div>
+                        <div><span className="font-medium">Summary:</span> {snvEvidence.summary || 'N/A'}</div>
+                        {snvEvidence.notes && <div><span className="font-medium">Notes:</span> {snvEvidence.notes}</div>}
+                      </>
+                    ) : (
+                      <div>No external evidence provided.</div>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {isFusion && (
+                <div className="rounded-md border border-gray-200 bg-white p-3">
+                  <div className="text-sm font-semibold text-gray-800 mb-1">Fusion Evidence</div>
+                  <div className="text-xs text-gray-600 mb-1">
+                    {row.fusion_partner_5 || 'Gene5'} &mdash; {row.fusion_partner_3 || 'Gene3'} &bull; {row.fusion_type || 'fusion'}
+                  </div>
+                  <div className="text-xs text-gray-500 mb-2">Junction: {row.fusion_junction || 'N/A'} &bull; Support reads: {row.fusion_support_reads || 'N/A'}</div>
+                  <div className="text-xs text-gray-600 space-y-0.5">
+                    <div><span className="font-medium">Tumor:</span> {tumorType}{tumorSubtype ? ` (${tumorSubtype})` : ''}</div>
+                    {fusionContext ? (
+                      <>
+                        <div><span className="font-medium">Sources:</span> {formatList(fusionContext.tumorData.sources)}</div>
+                        <div><span className="font-medium">Samples:</span> {fusionContext.tumorData.samples || 'N/A'}</div>
+                        {fusionContext.subtypeData && (
+                          <div><span className="font-medium">Subtype samples:</span> {fusionContext.subtypeData.samples || 'N/A'}</div>
+                        )}
+                        {fusionContext.tumorData.notes && <div><span className="font-medium">Notes:</span> {fusionContext.tumorData.notes}</div>}
+                      </>
+                    ) : (
+                      <div>No fusion evidence available for selected tumor type.</div>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {isCTA && (
+                <div className="rounded-md border border-gray-200 bg-white p-3">
+                  <div className="text-sm font-semibold text-gray-800 mb-1">CTA Expression (Human Protein Atlas)</div>
+                  <div className="text-xs text-gray-600 mb-1">{row.cta_gene || row.gene_name || 'CTA'} &bull; {row.cta_tissue_specificity || 'tissue-specific'}</div>
+                  {ctaExpression ? (
+                    <div className="text-xs text-gray-600 space-y-0.5">
+                      <div><span className="font-medium">Group:</span> {ctaExpression.group || 'N/A'}</div>
+                      <div><span className="font-medium">Median TPM:</span> {ctaExpression.median_tpm || 'N/A'}</div>
+                      <div><span className="font-medium">TPM Range:</span> {ctaExpression.tpm_range || 'N/A'}</div>
+                      <div><span className="font-medium">Enriched Tissues:</span> {formatList(ctaExpression.enriched_tissues)}</div>
+                      {ctaExpression.source && <div><span className="font-medium">Source:</span> {ctaExpression.source}</div>}
+                    </div>
+                  ) : (
+                    <div className="text-xs text-gray-600">No CTA expression distribution available.</div>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
 
           <div>
             <label className="block mb-1 text-xs font-medium text-gray-700">Comments</label>
