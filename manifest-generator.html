@@ -81,6 +81,15 @@
       return typeMap[prefix] || null;
     };
 
+    const sampleTypePrefixMap = {
+      'Tumor RNA': 'ar-',
+      'Normal RNA': 'nr-',
+      'Tumor DNA': 'ad-',
+      'Normal DNA': 'nd-'
+    };
+
+    const stripRunPrefix = (runName) => (runName || '').replace(/^(ad-|nd-|ar-|nr-)/i, '');
+
     const InfoTooltip = ({ text }) => {
       const [show, setShow] = useState(false);
       return (
@@ -242,17 +251,21 @@
       const validateCurrentSample = () => {
         const errors = [];
         if (!currentSample.Patient_Name) errors.push('Patient Name required');
+        if (!currentSample.Dataset) errors.push('Dataset required');
+        const sampleType = getSampleType(currentSample.Run_Name);
+        if (!sampleType) errors.push('Sample Type required');
         if (!currentSample.Run_Name) {
           errors.push('Run Name required');
         } else if (!currentSample.Run_Name.match(/^(ad|nd|ar|nr)[-_]/i)) {
           errors.push('Run Name must start with ad-, nd-, ar-, or nr-');
+        } else if (!stripRunPrefix(currentSample.Run_Name).trim()) {
+          errors.push('Run Name identifier required');
         } else {
           const duplicateRunName = samples.find(s =>
             s.id !== editingId && s.Patient_Name === currentSample.Patient_Name && s.Run_Name === currentSample.Run_Name
           );
           if (duplicateRunName) errors.push(`Run Name "${currentSample.Run_Name}" is already used for patient "${currentSample.Patient_Name}"`);
         }
-        if (!currentSample.Dataset) errors.push('Dataset required');
         if (!currentSample.File_Prefix) errors.push('File Prefix required');
         const finalGroup = currentSample.Group || currentSample.Patient_Name;
         const groupPatients = samples.filter(s => s.id !== editingId && s.Group === finalGroup && s.Patient_Name).map(s => s.Patient_Name);
@@ -338,9 +351,17 @@
 
       const removeSample = (id) => setSamples(samples.filter(s => s.id !== id));
 
-      const applyPrefix = (prefix) => {
-        const identifier = currentSample.Run_Name.replace(/^(ad-|nd-|ar-|nr-)/i, '');
-        setCurrentSample({ ...currentSample, Run_Name: prefix + identifier });
+      const setSampleType = (sampleType) => {
+        const prefix = sampleTypePrefixMap[sampleType] || '';
+        const identifier = stripRunPrefix(currentSample.Run_Name);
+        setCurrentSample({ ...currentSample, Run_Name: `${prefix}${identifier}` });
+      };
+
+      const setRunIdentifier = (identifier) => {
+        const currentType = getSampleType(currentSample.Run_Name);
+        const prefix = currentType ? sampleTypePrefixMap[currentType.type] : '';
+        const sanitizedIdentifier = stripRunPrefix(identifier);
+        setCurrentSample({ ...currentSample, Run_Name: `${prefix}${sanitizedIdentifier}` });
       };
 
       const importFromTSV = (e) => {
@@ -436,6 +457,11 @@
               )}
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
                 <div>
+                  <label className="block text-xs font-medium text-gray-700 mb-1">Dataset * <InfoTooltip text="Dataset identifier for grouping samples" /></label>
+                  <input type="text" value={currentSample.Dataset} onChange={(e) => setCurrentSample({ ...currentSample, Dataset: e.target.value })}
+                    placeholder="e.g., MyDataset" className="w-full px-2 py-1.5 text-sm border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500" />
+                </div>
+                <div>
                   <label className="block text-xs font-medium text-gray-700 mb-1">
                     Patient Name *
                     <InfoTooltip text="Identifier for the patient. Use 'UNIV' for universal samples shared across patients." />
@@ -445,31 +471,33 @@
                 </div>
                 <div>
                   <label className="block text-xs font-medium text-gray-700 mb-1">
-                    Run Name *
-                    <InfoTooltip text={`Format: prefix-identifier\n\nPrefix options:\n• ad- = Abnormal (tumor) DNA\n• nd- = Normal DNA\n• ar- = Abnormal (tumor) RNA\n• nr- = Normal RNA\n\nExample: ad-Pt01-03A`} />
+                    Sample Type *
+                    <InfoTooltip text="Select sample type. This sets the Run Name prefix automatically." />
                   </label>
-                  <div className="flex gap-1">
-                    <select onChange={(e) => applyPrefix(e.target.value)} className="px-1.5 py-1.5 border border-gray-300 rounded-l-md bg-gray-50 text-xs">
-                      <option value="">Prefix</option>
-                      <option value="ad-">ad-</option>
-                      <option value="nd-">nd-</option>
-                      <option value="ar-">ar-</option>
-                      <option value="nr-">nr-</option>
-                    </select>
-                    <input type="text" value={currentSample.Run_Name} onChange={(e) => setCurrentSample({ ...currentSample, Run_Name: e.target.value })}
-                      placeholder="e.g., ad-Pt01-03A" className="flex-1 px-2 py-1.5 text-sm border border-gray-300 rounded-r-md focus:ring-2 focus:ring-blue-500" />
-                  </div>
+                  <select
+                    value={currentSampleType ? currentSampleType.type : ''}
+                    onChange={(e) => setSampleType(e.target.value)}
+                    className="w-full px-2 py-1.5 text-sm border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500"
+                  >
+                    <option value="">Select sample type...</option>
+                    <option value="Tumor RNA">Tumor RNA</option>
+                    <option value="Normal RNA">Normal RNA</option>
+                    <option value="Tumor DNA">Tumor DNA</option>
+                    <option value="Normal DNA">Normal DNA</option>
+                  </select>
                 </div>
                 <div>
-                  <label className="block text-xs font-medium text-gray-700 mb-1">Sample Type <InfoTooltip text="Determined by Run Name prefix" /></label>
-                  <div className="w-full px-2 py-1.5 border border-gray-200 rounded-md bg-gray-50 text-sm">
-                    {currentSampleType ? <span className={`font-medium ${currentSampleType.isNormal ? 'text-green-700' : 'text-purple-700'}`}>{currentSampleType.type}</span> : <span className="text-gray-400">Determined by Run Name</span>}
-                  </div>
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-gray-700 mb-1">Dataset * <InfoTooltip text="Dataset identifier for grouping samples" /></label>
-                  <input type="text" value={currentSample.Dataset} onChange={(e) => setCurrentSample({ ...currentSample, Dataset: e.target.value })}
-                    placeholder="e.g., MyDataset" className="w-full px-2 py-1.5 text-sm border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500" />
+                  <label className="block text-xs font-medium text-gray-700 mb-1">
+                    Run Name Identifier *
+                    <InfoTooltip text="Identifier portion of Run Name. Prefix is set from Sample Type." />
+                  </label>
+                  <input
+                    type="text"
+                    value={stripRunPrefix(currentSample.Run_Name)}
+                    onChange={(e) => setRunIdentifier(e.target.value)}
+                    placeholder="e.g., Pt01-03A"
+                    className="w-full px-2 py-1.5 text-sm border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500"
+                  />
                 </div>
                 <div>
                   <label className="block text-xs font-medium text-gray-700 mb-1">

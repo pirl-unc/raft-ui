@@ -139,9 +139,7 @@
                 <label class="block text-sm font-medium text-gray-700 mb-2">Workflow Version</label>
                 <select id="workflowVersion" class="w-full border border-gray-300 rounded-md p-2 focus:ring-2 focus:ring-blue-500">
                     <option value="">Select version...</option>
-                    <option value="lens-v1.8">lens-v1.8</option>
-                    <option value="lens-v1.7">lens-v1.7</option>
-                    <option value="lens-v1.6">lens-v1.6</option>
+                    <option value="lens-v1.9-dev">lens-v1.9-dev</option>
                 </select>
             </div>
 
@@ -220,9 +218,10 @@
 
         // Real LENS config data (from uploaded file)
         const LENS_CONFIG_TEXT = `params.dummy_file = "\${params.ref_dir}/dummy_file"
+params.dummy_file = "\${params.ref_dir}/dummy_file"
 
 params.immuno$parse_immuno_manifest$molecule_filter = ''
-params.immuno$parse_immuno_manifest$separator = '\\t'
+params.immuno$parse_immuno_manifest$separator = '\t'
 
 # DNA Alignment
 params.lens$alignment$manifest_to_dna_alns$fq_trim_tool = "fastp"
@@ -287,7 +286,7 @@ params.lens$somatic$som_vars_to_filtd_som_vars$vcf_filtering_tool_parameters = "
 
 # Stringent Variant Filtering for MAF Generation
 params.lens$somatic$som_vars_to_filtd_som_vars_hi_conf$vcf_filtering_tool = 'bcftools'
-params.lens$somatic$som_vars_to_filtd_som_vars_hi_conf$vcf_filtering_tool_parameters = "['mutect2': '-i \\\\'FILTER=\\"PASS\\" && INFO/TLOD>6.3 && FORMAT/DP[0]>=10 && FORMAT/AD[0:1]>=3\\\\'', 'strelka2': '-i \\\\'FILTER=\\"PASS\\" && INFO/SomaticEVS > 12 && FORMAT/DP[0]>=8\\\\'']"
+params.lens$somatic$som_vars_to_filtd_som_vars_hi_conf$vcf_filtering_tool_parameters = "['mutect2': '-i \\'FILTER=\"PASS\" && INFO/TLOD>6.3 && FORMAT/DP[0]>=10 && FORMAT/AD[0:1]>=3\\'', 'strelka2': '-i \\'FILTER=\"PASS\" && INFO/SomaticEVS > 12 && FORMAT/DP[0]>=8\\'']"
 
 # SNV/InDel Filtering
 params.lens$snpsift_filter_snvs$snpsift_snv_filter_parameters = "ANN[*].EFFECT has 'missense_variant'"
@@ -299,14 +298,13 @@ params.lens$somatic$som_vars_to_normd_som_vars$vcf_norming_tool_parameters = "[]
 params.lens$somatic$som_vars_to_normd_som_vars$aln_ref = "\${params.ref_dir}/Homo_sapiens.assembly38.fa"
 
 # Somatic Variant Merging
-# Variant Merging and Phasing
-params.lens$seq_variation$combine_strategy = "union"
+params.lens$somatic$combine_strategy = "union"
 # Intersection
-params.lens$seq_variation$som_vars_to_isecd_som_vars$vcf_isecing_tool = "bedtools"
-params.lens$seq_variation$som_vars_to_isecd_som_vars$vcf_isecing_tool_parameters = "[]"
+params.lens$somatic$som_vars_to_isecd_som_vars$vcf_isecing_tool = "bedtools"
+params.lens$somatic$som_vars_to_isecd_som_vars$vcf_isecing_tool_parameters = "[]"
 # Union
-params.lens$seq_variation$som_vars_to_union_som_vars$vcf_merging_tool = 'jacquard_merge'
-params.lens$seq_variation$som_vars_to_union_som_vars$vcf_merging_tool_parameters = "['jacquard_merge': '--include_format_tags=\\"GT,AF,AU,CU,GU,TU,TAR,TIR,FREQ,VAF,DP,AD\\"']"
+params.lens$somatic$som_vars_to_union_som_vars$vcf_merging_tool = 'jacquard_merge'
+params.lens$somatic$som_vars_to_union_som_vars$vcf_merging_tool_parameters = "['jacquard_merge': '--include_format_tags=\"GT,AF,AU,CU,GU,TU,TAR,TIR,FREQ,VAF,DP,AD\"']"
 
 # Variant Annotation
 params.lens$snpeff$annot_tool_ref = "\${params.ref_dir}/GRCh38.GENCODEv37"
@@ -358,11 +356,13 @@ params.lens$immuno$procd_fqs_to_dna_mhc_alleles$mhc_caller_tool = 'optitype_dna'
 params.lens$immuno$procd_fqs_to_dna_mhc_alleles$mhc_caller_tool_parameters = "[]"
 
 # TCR Repertoire
+params.lens$immuno$procd_fqs_to_tcr_repertoire$tcr_rep_tool = ''
+params.lens$immuno$procd_fqs_to_tcr_repertoire$tcr_rep_tool_paraneters = "[]"
 
 # Splice Variants
 params.lens$splice$alns_to_splice_variants$splice_var_caller = 'snaf'
 params.lens$splice$alns_to_splice_variants$splice_var_caller_parameters = "[]"
-params.lens$splice$alns_to_splice_variants$splice_var_caller_ref = "['snaf': \\"\${params.ref_dir}/snaf-data\\", 'netmhcpan': \\"\${params.ref_dir}/netMHCpan-4.1\\"]"
+params.lens$splice$alns_to_splice_variants$splice_var_caller_ref = "['snaf': \"\${params.ref_dir}/snaf-data\", 'netmhcpan': \"\${params.ref_dir}/netMHCpan-4.1\"]"
 params.lens$splice$alns_to_splice_variants$aln_ref = "\${params.ref_dir}/Homo_sapiens.assembly38.fa"
 params.lens$splice$alns_to_splice_variants$gtf = "\${params.ref_dir}/gencode.v37.annotation.with.hervs.gtf"
 params.lens$splice$alns_to_splice_variants$gff = "\${params.ref_dir}/gencode.v37.annotation.gff3"
@@ -377,32 +377,32 @@ params.lens$viral$unaligned_fqs_to_virdetect_cds_counts$viral_cds_ref = "\${para
 # Gene Fusion Calling
 params.lens$fusion$procd_fqs_to_fusions$fusion_tool = 'starfusion'
 params.lens$fusion$procd_fqs_to_fusions$fusion_tool_parameters = "['starfusion': '--examine_coding_effect']"
-params.lens$fusion$procd_fqs_to_fusions$fusion_ref = "['starfusion': \\"\${params.ref_dir}/GRCh38_gencode_v37_CTAT_lib_Mar012021.plug-n-play\\"]"
+params.lens$fusion$procd_fqs_to_fusions$fusion_ref = "['starfusion': \"\${params.ref_dir}/GRCh38_gencode_v37_CTAT_lib_Mar012021.plug-n-play\"]"
 params.lens$fusion$procd_fqs_to_fusions$dna_ref = "\${params.ref_dir}/Homo_sapiens.assembly38.fa"
 params.lens$fusion$procd_fqs_to_fusions$gtf  = ""
 params.lens$fusion$procd_fqs_to_fusions$species = 'Homo sapiens'
 
 # Tumor Purity
-params.lens$tumor_purity$alns_to_tumor_purities$tx_quant_tool = ''
-params.lens$tumor_purity$alns_to_tumor_purities$tx_quant_tool_parameters = "[]"
-params.lens$tumor_purity$alns_to_tumor_purities$tumor_purities_tool = 'sequenza'
-params.lens$tumor_purity$alns_to_tumor_purities$tumor_purities_tool_parameters = "[sequenza_gc_wiggle: '-w 50', sequenza_bam2seqz: '', sequenza_seqz_binning: '-w 50']"
-params.lens$tumor_purity$alns_to_tumor_purities$aln_ref = "\${params.ref_dir}/Homo_sapiens.assembly38.fa"
-params.lens$tumor_purity$alns_to_tumor_purities$gtf = "\${params.ref_dir}/gencode.v37.annotation.with.hervs.gtf"
-params.lens$tumor_purity$alns_to_tumor_purities$bed = "\${params.ref_dir}/hg38_exome.bed"
+params.lens$onco$alns_to_tumor_purities$tx_quant_tool = ''
+params.lens$onco$alns_to_tumor_purities$tx_quant_tool_parameters = "[]"
+params.lens$onco$alns_to_tumor_purities$tumor_purities_tool = 'sequenza'
+params.lens$onco$alns_to_tumor_purities$tumor_purities_tool_parameters = "[sequenza_gc_wiggle: '-w 50', sequenza_bam2seqz: '', sequenza_seqz_binning: '-w 50']"
+params.lens$onco$alns_to_tumor_purities$aln_ref = "\${params.ref_dir}/Homo_sapiens.assembly38.fa"
+params.lens$onco$alns_to_tumor_purities$gtf = "\${params.ref_dir}/gencode.v37.annotation.with.hervs.gtf"
+params.lens$onco$alns_to_tumor_purities$bed = "\${params.ref_dir}/hg38_exome.bed"
 
 # CNA and cancer cell fraction
-params.lens$copy_number_alterations$alns_to_cnas$cna_tool = 'cnvkit'
-params.lens$copy_number_alterations$alns_to_cnas$cna_tool_refs = ''
-params.lens$copy_number_alterations$alns_to_cnas$cna_tool_parameters = "[cnvkit_segment: '--drop-low-coverage', cnvkit_call: '--ploidy 2']"
-params.lens$copy_number_alterations$alns_to_cnas$aln_ref = "\${params.ref_dir}/Homo_sapiens.assembly38.fa"
-params.lens$copy_number_alterations$alns_to_cnas$bed = "\${params.ref_dir}/hg38_exome.bed"
-params.lens$copy_number_alterations$alns_to_cnas$gtf = "\${params.ref_dir}/gencode.v37.annotation.with.hervs.gtf"
+params.lens$onco$alns_to_cnas$cna_tool = 'cnvkit'
+params.lens$onco$alns_to_cnas$cna_tool_refs = ''
+params.lens$onco$alns_to_cnas$cna_tool_parameters = "[cnvkit_segment: '--drop-low-coverage', cnvkit_call: '--ploidy 2']"
+params.lens$onco$alns_to_cnas$aln_ref = "\${params.ref_dir}/Homo_sapiens.assembly38.fa"
+params.lens$onco$alns_to_cnas$bed = "\${params.ref_dir}/hg38_exome.bed"
+params.lens$onco$alns_to_cnas$gtf = "\${params.ref_dir}/gencode.v37.annotation.with.hervs.gtf"
 
 # HLA Loss of heterozygosity
-params.lens$hla_loh$alns_and_alleles_to_loh_hla$hla_loh_tool = 'lohhla'
-params.lens$hla_loh$alns_and_alleles_to_loh_hla$hla_loh_tool_refs = "['lohhla': \\"\${params.ref_dir}/hla_fix.fasta\\"]"
-params.lens$hla_loh$alns_and_alleles_to_loh_hla$hla_loh_tool_parameters = '[]'
+params.onco$alns_and_alleles_to_loh_hla$hla_loh_tool = 'lohhla'
+params.onco$alns_and_alleles_to_loh_hla$hla_loh_tool_refs = "['lohhla': \"\${params.ref_dir}/hla_fix.fasta\"]"
+params.onco$alns_and_alleles_to_loh_hla$hla_loh_tool_parameters = '[]'
 
 # CTA/Self-antigens Neoantigen Workflow
 params.lens$neos$selfs_to_neos$gtf = "\${params.ref_dir}/gencode.v37.annotation.with.hervs.gtf"
@@ -421,7 +421,7 @@ params.lens$neos$ervs_to_neos$lenstools_get_expressed_ervs_bed_parameters = ""
 params.lens$neos$ervs_to_neos$lenstools_make_erv_peptides_parameters = ""
 params.lens$neos$ervs_to_neos$lenstools_filter_expressed_ervs_parameters = ""
 params.lens$neos$ervs_to_neos$lenstools_filter_ervs_by_rna_coverage_parameters = "--mean-depth 25"
-params.lens$neos$ervs_to_neos$normal_control_quant = ""
+params.lens$neos$ervs_to_neos$normal_control_quant = "\${params.ref_dir}/pan_normal_and_mtec_exp.95th_perc_tpm.homo_sapiens.quant.sf"
 params.lens$neos$ervs_to_neos$tpm_threshold = ""
 
 # SNVs Neoantigen Workflow
@@ -461,25 +461,25 @@ params.lens$neos$viruses_to_neos$lenstools_get_expressed_viral_bed_parameters = 
 params.lens$neos$viruses_to_neos$lenstools_make_viral_peptides_parameters = ""
 
 # pMHC Summarization
-params.lens$pmhc_characterization$peps_and_alleles_to_antigen_stats$antigen_tool = 'mhcflurry'
-params.lens$pmhc_characterization$peps_and_alleles_to_antigen_stats$antigen_tool_parameters = '[]'
-params.lens$pmhc_characterization$peps_and_alleles_to_antigen_stats$antigen_tool_ref_dir = "['mhcflurry': \\"\${params.ref_dir}/mhcflurry\\"]"
-params.lens$pmhc_characterization$peps_and_alleles_to_antigen_stats$species = 'human'
-params.lens$pmhc_characterization$peps_and_alleles_to_antigen_stats$peptide_lengths = '8,9,10,11'
+params.lens$immuno$peps_and_alleles_to_antigen_stats$antigen_tool = 'mhcflurry'
+params.lens$immuno$peps_and_alleles_to_antigen_stats$antigen_tool_parameters = '[]'
+params.lens$immuno$peps_and_alleles_to_antigen_stats$antigen_tool_ref_dir = "['mhcflurry': \"\${params.ref_dir}/mhcflurry\"]"
+params.lens$immuno$peps_and_alleles_to_antigen_stats$species = 'human'
+params.lens$immuno$peps_and_alleles_to_antigen_stats$peptide_lengths = '8,9,10,11'
 
 # pMHC Summarizatoin Second Pass
-params.lens$pmhc_characterization$peps_and_alleles_to_antigen_stats_second_pass$antigen_tool = ''
-params.lens$pmhc_characterization$peps_and_alleles_to_antigen_stats_second_pass$antigen_tool_parameters = '[]'     
-params.lens$pmhc_characterization$peps_and_alleles_to_antigen_stats_second_pass$antigen_tool_ref_dir = "[]"        
-params.lens$pmhc_characterization$peps_and_alleles_to_antigen_stats_second_pass$species = 'human'                  
-params.lens$pmhc_characterization$peps_and_alleles_to_antigen_stats_second_pass$peptide_lengths = '8,9,10,11'
+params.lens$immuno$peps_and_alleles_to_antigen_stats_second_pass$antigen_tool = ''
+params.lens$immuno$peps_and_alleles_to_antigen_stats_second_pass$antigen_tool_parameters = '[]'     
+params.lens$immuno$peps_and_alleles_to_antigen_stats_second_pass$antigen_tool_ref_dir = "[]"        
+params.lens$immuno$peps_and_alleles_to_antigen_stats_second_pass$species = 'human'                  
+params.lens$immuno$peps_and_alleles_to_antigen_stats_second_pass$peptide_lengths = '8,9,10,11'
 
 # Agretopicity Calculation
-params.lens$pmhc_characterization$calculate_agretopicity$blastp_db_dir = "\${params.ref_dir}/antigen.garnish"
-params.lens$pmhc_characterization$calculate_agretopicity$peps_and_alleles_to_antigen_stats$antigen_tool = 'mhcflurry'
-params.lens$pmhc_characterization$calculate_agretopicity$peps_and_alleles_to_antigen_stats$antigen_tool_parameters = '[]'
-params.lens$pmhc_characterization$calculate_agretopicity$peps_and_alleles_to_antigen_stats$antigen_tool_ref_dir = "['mhcflurry': \\"\${params.ref_dir}/mhcflurry\\"]"
-params.lens$pmhc_characterization$calculate_agretopicity$peps_and_alleles_to_antigen_stats$peptide_lengths = '8,9,10,11'
+params.lens$immuno$calculate_agretopicity$blastp_db_dir = "\${params.ref_dir}/antigen.garnish"
+params.lens$immuno$calculate_agretopicity$peps_and_alleles_to_antigen_stats$antigen_tool = 'mhcflurry'
+params.lens$immuno$calculate_agretopicity$peps_and_alleles_to_antigen_stats$antigen_tool_parameters = '[]'
+params.lens$immuno$calculate_agretopicity$peps_and_alleles_to_antigen_stats$antigen_tool_ref_dir = "['mhcflurry': \"\${params.ref_dir}/mhcflurry\"]"
+params.lens$immuno$calculate_agretopicity$peps_and_alleles_to_antigen_stats$peptide_lengths = '8,9,10,11'
 
 # Peptide Quantification
 params.lens$lenstools$lenstools_get_snv_peptide_read_count$gtf = "\${params.ref_dir}/gencode.v37.annotation.with.hervs.gtf"
@@ -494,7 +494,7 @@ params.lens$lenstools$lenstools_annotate_pmhcs$binding_affinity_threshold = 500
 # Relevant Metadata
 params.lens$lenstools$annotate_ctas$cta_external_ref = "\${params.ref_dir}/canonical_txs.mtec.norm.subcell.annot.tsv"
 params.lens$lenstools$annotate_ervs$erv_external_ref = "\${params.ref_dir}/erv_scores.25SEP2023.tsv"
-params.lens$lenstools$annotate_erv_peptides$erv_not_in_norm_peptides = "\${params.ref_dir}/ervs_not_in_norm.peptides.tsv"
+params.lens$lenstools$annotate_erv_peptides$erv_peps_norm_mtec_status = "\${params.ref_dir}/erv_pep_exp_norm_and_mtec.homo_sapiens.tsv"
 
 # QC
 params.lens$qc$bams_to_sample_swap_check$sample_swap_tool = 'somalier'
@@ -506,7 +506,7 @@ params.lens$qc$bams_to_sample_swap_check$sample_swap_tool_parameters = "[]"
 params.binfotron_image = "benjaminvincentlab/rserver-binfotron:4.2.1.59"
 
 # LENS Version
-params.lens$lenstools_make_lens_report$lens_version = 'lens-v1.8'
+params.lens$lenstools_make_lens_report$lens_version = 'lens-v1.9-dev'
 `;
 
         // API configuration
@@ -638,7 +638,7 @@ params.lens$lenstools_make_lens_report$lens_version = 'lens-v1.8'
         // Start auto-save interval
         setInterval(autoSaveState, 5000);
 
-        // Recommended tool versions from LENS v1.8
+        // Recommended tool versions from LENS v1.9-dev
         const recommendedToolVersions = {
             'abra2': '2.24',
             'altanalyze': '0.7.0.1-fix-nowd',
@@ -683,9 +683,9 @@ params.lens$lenstools_make_lens_report$lens_version = 'lens-v1.8'
             'jacquard': '1.1.5',
             'jq': '1.6',
             'kallisto': '0.51.1',
-            'lenstools': '1.8',
-            'lenstools_r': '1.8',
-            'lenstoolsr': '1.8',
+            'lenstools': '1.9-dev',
+            'lenstools_r': '1.9-dev',
+            'lenstoolsr': '1.9-dev',
             'lohhla': 'v1.6',
             'longgf': 'latest',
             'mapquik': '1.0',
@@ -746,7 +746,7 @@ params.lens$lenstools_make_lens_report$lens_version = 'lens-v1.8'
             'whatshap': '2.4'
         };
 
-        // Mock DockerHub data from LENS v1.8
+        // Mock DockerHub data from LENS v1.9-dev
         const mockDockerHubData = {
             'altanalyze': {
                 account: 'spvensko',
@@ -835,19 +835,19 @@ params.lens$lenstools_make_lens_report$lens_version = 'lens-v1.8'
             'lenstools': {
                 account: 'spvensko',
                 repo: 'lenstools',
-                versions: ['1.8'],
+                versions: ['1.9-dev'],
                 isOfficial: false
             },
             'lenstools_r': {
                 account: 'spvensko',
                 repo: 'lenstools_r',
-                versions: ['1.8'],
+                versions: ['1.9-dev'],
                 isOfficial: false
             },
             'lenstoolsr': {
                 account: 'spvensko',
                 repo: 'lenstools_r',
-                versions: ['1.8'],
+                versions: ['1.9-dev'],
                 isOfficial: false
             },
             'lohhla': {
@@ -1038,7 +1038,7 @@ params.lens$lenstools_make_lens_report$lens_version = 'lens-v1.8'
             }
         };
 
-        // Mock BioContainers fallback data from LENS v1.8
+        // Mock BioContainers fallback data from LENS v1.9-dev
         const mockBiocontainerVersions = {
             'abra2': ['2.24', '2.23', '2.22'],
             'arcas-hla': ['0.6.0', '0.5.0', '0.4.0'],
@@ -1428,7 +1428,7 @@ params.lens$lenstools_make_lens_report$lens_version = 'lens-v1.8'
             versionSelect.innerHTML = '<option value="">Select version...</option>';
             
             if (e.target.value) {
-                const versions = ['lens-v1.8', 'lens-v1.7', 'lens-v1.6'];
+                const versions = ['lens-v1.9-dev'];
                 versions.forEach(version => {
                     const option = document.createElement('option');
                     option.value = version;
@@ -2495,7 +2495,7 @@ params.lens$lenstools_make_lens_report$lens_version = 'lens-v1.8'
             // Add note for NetMHCpan and NetMHCstabpan about Docker images
             if (option.value === 'netmhcpan' || option.value === 'netmhcstabpan') {
                 const netmhcNote = document.createElement('a');
-                netmhcNote.href = 'https://uselens.io/en/lens-v1.8/technical.html#creating-netmhc-docker-images';
+                netmhcNote.href = 'https://uselens.io/en/lens-v1.9-dev/technical.html#creating-netmhc-docker-images';
                 netmhcNote.target = '_blank';
                 netmhcNote.className = 'ml-2 text-xs text-blue-600 hover:text-blue-800 inline-flex items-center gap-1';
                 netmhcNote.innerHTML = `
@@ -3006,7 +3006,7 @@ params.lens$lenstools_make_lens_report$lens_version = 'lens-v1.8'
             const paragraphs = [];
             
             // First paragraph - pipeline overview and alignment
-            let para1 = `Sequencing data processing and analysis were performed using the ${state.workflow || 'LENS'} workflow (version ${state.version || '1.8'})`;
+            let para1 = `Sequencing data processing and analysis were performed using the ${state.workflow || 'LENS'} workflow (version ${state.version || '1.9-dev'})`;
             
             if (references.aln_ref || references.global_aln_ref) {
                 const refName = (references.aln_ref || references.global_aln_ref).replace(/\.(fa|fasta)$/, '');
