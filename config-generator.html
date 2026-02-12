@@ -154,6 +154,21 @@
         <!-- Workflow Configuration -->
         <div id="workflowConfig" class="hidden">
             <div class="bg-white rounded-lg shadow-md p-6 mb-6">
+                <h2 class="text-2xl font-semibold mb-4">Runtime Limits (Per Process)</h2>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                        <label for="maxCpus" class="block text-sm font-medium text-gray-700 mb-2">Max CPUs</label>
+                        <input id="maxCpus" type="text" class="w-full border border-gray-300 rounded-md p-2 focus:ring-2 focus:ring-blue-500 workflow-param" data-parameter="params.max_cpus" placeholder="e.g., 16">
+                    </div>
+                    <div>
+                        <label for="maxMem" class="block text-sm font-medium text-gray-700 mb-2">Max Memory</label>
+                        <input id="maxMem" type="text" class="w-full border border-gray-300 rounded-md p-2 focus:ring-2 focus:ring-blue-500 workflow-param" data-parameter="params.max_mem" placeholder="e.g., 64.GB">
+                    </div>
+                </div>
+                <p class="text-xs text-gray-500 mt-3">Used to populate <code>params.max_cpus</code> and <code>params.max_mem</code>.</p>
+            </div>
+
+            <div class="bg-white rounded-lg shadow-md p-6 mb-6">
                 <h2 class="text-2xl font-semibold mb-4">Workflow Configuration</h2>
                 <div id="configSections" class="space-y-4"></div>
             </div>
@@ -217,8 +232,10 @@
         const IS_LOCAL = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
 
         // Real LENS config data (from uploaded file)
-        const LENS_CONFIG_TEXT = `params.dummy_file = "\${params.ref_dir}/dummy_file"
+const LENS_CONFIG_TEXT = `params.dummy_file = "\${params.ref_dir}/dummy_file"
 params.dummy_file = "\${params.ref_dir}/dummy_file"
+params.max_mem = ''
+params.max_cpus = ''
 
 params.immuno$parse_immuno_manifest$molecule_filter = ''
 params.immuno$parse_immuno_manifest$separator = '\t'
@@ -518,6 +535,8 @@ params.lens$lenstools_make_lens_report$lens_version = 'lens-v1.9-dev'
             species: null,
             startingData: null,
             version: null,
+            maxMem: '',
+            maxCpus: '',
             config: {},
             toolSelections: {},
             parameterValues: {}
@@ -530,7 +549,9 @@ params.lens$lenstools_make_lens_report$lens_version = 'lens-v1.9-dev'
                 workflow: params.get('workflow') || '',
                 version: params.get('version') || '',
                 species: params.get('species') || '',
-                startingData: params.get('startingData') || ''
+                startingData: params.get('startingData') || '',
+                maxMem: params.get('max_mem') || '',
+                maxCpus: params.get('max_cpus') || params.get('max_cpu') || ''
             };
         }
 
@@ -549,6 +570,12 @@ params.lens$lenstools_make_lens_report$lens_version = 'lens-v1.9-dev'
             }
             if (params.startingData) {
                 document.getElementById('startingData').value = params.startingData;
+            }
+            if (params.maxMem) {
+                document.getElementById('maxMem').value = params.maxMem;
+            }
+            if (params.maxCpus) {
+                document.getElementById('maxCpus').value = params.maxCpus;
             }
             // Set version after a short delay to allow version dropdown to populate
             if (params.version) {
@@ -1388,6 +1415,18 @@ params.lens$lenstools_make_lens_report$lens_version = 'lens-v1.9-dev'
         document.getElementById('saveToRaft').addEventListener('click', saveConfigToRaft);
         document.getElementById('copyMethods').addEventListener('click', copyMethodsToClipboard);
         document.getElementById('downloadMethods').addEventListener('click', downloadMethodsFile);
+        document.getElementById('maxCpus').addEventListener('input', () => {
+            if (state.workflow) {
+                generateConfigOutput();
+                generateMethodsDescription();
+            }
+        });
+        document.getElementById('maxMem').addEventListener('input', () => {
+            if (state.workflow) {
+                generateConfigOutput();
+                generateMethodsDescription();
+            }
+        });
 
         // Header button listeners (same functions as in-section buttons)
         document.getElementById('headerDownloadConfig').addEventListener('click', downloadConfigFile);
@@ -1464,6 +1503,7 @@ params.lens$lenstools_make_lens_report$lens_version = 'lens-v1.9-dev'
             try {
                 // Parse config
                 const workflowConfig = parseConfigFile(LENS_CONFIG_TEXT);
+                applyRuntimeDefaults(workflowConfig.paramMap);
                 
                 // Collect all tool names from the config
                 const allTools = new Set();
@@ -1518,15 +1558,35 @@ params.lens$lenstools_make_lens_report$lens_version = 'lens-v1.9-dev'
             const paramMap = {};
             
             for (const line of lines) {
-                const match = line.match(/params\.([^\s=]+)\s*=\s*['"](.*)['"]/);
+                const match = line.match(/^\s*params\.([^\s=]+)\s*=\s*(.+?)\s*$/);
                 if (match) {
                     const paramName = match[1];
-                    const value = match[2];
+                    let value = match[2].trim();
+                    if ((value.startsWith('"') && value.endsWith('"')) ||
+                        (value.startsWith("'") && value.endsWith("'"))) {
+                        value = value.slice(1, -1);
+                    }
                     paramMap[paramName] = value;
                 }
             }
             
-            return buildWorkflowStructure(paramMap);
+            const structure = buildWorkflowStructure(paramMap);
+            structure.paramMap = paramMap;
+            return structure;
+        }
+
+        function applyRuntimeDefaults(paramMap = {}) {
+            const urlParams = getUrlParams();
+            const maxMemInput = document.getElementById('maxMem');
+            const maxCpusInput = document.getElementById('maxCpus');
+
+            const defaultMaxMem = urlParams.maxMem || paramMap.max_mem || '';
+            const defaultMaxCpus = urlParams.maxCpus || paramMap.max_cpus || paramMap.max_cpu || '';
+
+            maxMemInput.value = defaultMaxMem;
+            maxCpusInput.value = defaultMaxCpus;
+            state.maxMem = defaultMaxMem;
+            state.maxCpus = defaultMaxCpus;
         }
 
         function buildWorkflowStructure(paramMap) {
