@@ -154,7 +154,15 @@
         <!-- Workflow Configuration -->
         <div id="workflowConfig" class="hidden">
             <div class="bg-white rounded-lg shadow-md p-6 mb-6">
-                <h2 class="text-2xl font-semibold mb-4">Runtime Limits (Per Process)</h2>
+                <div class="flex items-center gap-2 mb-4">
+                    <h2 class="text-2xl font-semibold">Runtime Limits (Per Process)</h2>
+                    <span class="tooltip">
+                        <svg class="w-4 h-4 text-gray-500 inline cursor-help" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                        </svg>
+                        <span class="tooltiptext">Used to populate params.max_cpus and params.max_mem.</span>
+                    </span>
+                </div>
                 <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div>
                         <label for="maxCpus" class="block text-sm font-medium text-gray-700 mb-2">Max CPUs</label>
@@ -165,7 +173,6 @@
                         <input id="maxMem" type="text" class="w-full border border-gray-300 rounded-md p-2 focus:ring-2 focus:ring-blue-500 workflow-param" data-parameter="params.max_mem" placeholder="e.g., 64.GB">
                     </div>
                 </div>
-                <p class="text-xs text-gray-500 mt-3">Used to populate <code>params.max_cpus</code> and <code>params.max_mem</code>.</p>
             </div>
 
             <div class="bg-white rounded-lg shadow-md p-6 mb-6">
