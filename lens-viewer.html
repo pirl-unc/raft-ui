@@ -45,6 +45,7 @@
 
     // API base for preloading
     const API_BASE = window.location.origin;
+    const IS_GITHUB_HOSTED = window.location.hostname.includes('github.io');
     const getUrlParams = () => {
       const params = new URLSearchParams(window.location.search);
       return {
@@ -63,6 +64,7 @@
       { value: 'mhcflurry_2.1.1.pres_score', label: 'MHCFlurry Presentation Score' },
       { value: 'ccf', label: 'Cancer Cell Fraction' },
       { value: 'vaf', label: 'Variant Allele Frequency' },
+      { value: 'custom_score', label: 'Custom Formula Score' },
     ];
 
     const visMetrics = ['priority_score_maximum', 'priority_score_mhcflurry', 'mhcflurry_2.1.1.aff', 'ccf', 'vaf', 'tpm'];
@@ -136,12 +138,14 @@
       const [showPasteModal, setShowPasteModal] = useState(false);
       const [pasteData, setPasteData] = useState('');
       const [pasteError, setPasteError] = useState('');
+      const [bundleError, setBundleError] = useState('');
       const [mobileView, setMobileView] = useState('visualizations'); // 'visualizations' or 'pmhcs'
       const [patientTab, setPatientTab] = useState('pmhc'); // 'pmhc' or 'qc'
       const [qcData, setQcData] = useState({}); // QC data organized by patient/sample
       const [cohortQcData, setCohortQcData] = useState(null); // Cohort-level QC summary
       const [manifestData, setManifestData] = useState(null); // Manifest group data
       const [selectedGroup, setSelectedGroup] = useState(null); // Current group for multi-group patients
+      const [orderedGroups, setOrderedGroups] = useState([]); // Draggable group order for multi-group patients
 
       // CRC32 implementation for checksum verification
       const crc32 = (str) => {
@@ -201,6 +205,52 @@
         });
       };
 
+      const loadFilesMap = (filesMap) => {
+        let parsed = {};
+        for (const [filename, content] of Object.entries(filesMap)) {
+          parsed = parseFileContent(filename, content, parsed, manifestData);
+        }
+        setPatients({...parsed});
+        const firstId = Object.keys(parsed).sort()[0];
+        if (firstId) {
+          setSelectedPatient(firstId);
+          const patient = parsed[firstId];
+          if (patient.isMultiGroup && patient.groups.length > 0) {
+            setSelectedGroup(patient.groups[0]);
+            const groupData = patient.groupData[patient.groups[0]];
+            setSelectedAlleles(new Set(groupData.alleles));
+            setSelectedAntigenSources(new Set(groupData.antigenSources));
+          } else {
+            setSelectedAlleles(new Set(patient.alleles));
+            setSelectedAntigenSources(new Set(patient.antigenSources));
+          }
+        }
+      };
+
+      const handleBundleUpload = (e) => {
+        setBundleError('');
+        const file = e.target.files && e.target.files[0];
+        e.target.value = '';
+        if (!file) return;
+
+        const reader = new FileReader();
+        reader.onload = () => {
+          try {
+            const bundleText = String(reader.result || '');
+            const bundle = JSON.parse(bundleText);
+            const filesMap = bundle.files || bundle;
+            if (!filesMap || typeof filesMap !== 'object') {
+              throw new Error('Bundle missing files payload');
+            }
+            loadFilesMap(filesMap);
+          } catch (err) {
+            setBundleError(`Failed to load bundle: ${err.message}`);
+          }
+        };
+        reader.onerror = () => setBundleError('Failed to read selected bundle file.');
+        reader.readAsText(file);
+      };
+
       // Handle paste from CLI
       const handlePasteSubmit = async () => {
         setPasteError('');
@@ -212,25 +262,7 @@
           }
           const jsonStr = await decodeRaftData(cleanData);
           const files = JSON.parse(jsonStr);
-          let parsed = {};
-          for (const [filename, content] of Object.entries(files)) {
-            parsed = parseFileContent(filename, content, parsed, manifestData);
-          }
-          setPatients({...parsed});
-          const firstId = Object.keys(parsed).sort()[0];
-          if (firstId) {
-            setSelectedPatient(firstId);
-            const patient = parsed[firstId];
-            if (patient.isMultiGroup && patient.groups.length > 0) {
-              setSelectedGroup(patient.groups[0]);
-              const groupData = patient.groupData[patient.groups[0]];
-              setSelectedAlleles(new Set(groupData.alleles));
-              setSelectedAntigenSources(new Set(groupData.antigenSources));
-            } else {
-              setSelectedAlleles(new Set(patient.alleles));
-              setSelectedAntigenSources(new Set(patient.antigenSources));
-            }
-          }
+          loadFilesMap(files);
           setShowPasteModal(false);
           setPasteData('');
         } catch (e) {
@@ -622,6 +654,13 @@
         return () => window.removeEventListener('resize', handleResize);
       }, []);
 
+      // Reset group order when selected patient changes
+      useEffect(() => {
+        const p = patients[selectedPatient];
+        if (p?.groups) setOrderedGroups([...p.groups]);
+        else setOrderedGroups([]);
+      }, [selectedPatient]);
+
       // Handle file upload
       const handleFileUpload = (e) => {
         const fileList = Array.from(e.target.files);
@@ -802,6 +841,11 @@
                         {preloadError}
                       </div>
                     )}
+                    {bundleError && (
+                      <div className="bg-red-50 border border-red-200 rounded-md p-4 mb-6 text-red-700 text-sm">
+                        {bundleError}
+                      </div>
+                    )}
                     <div className="mx-auto mb-6 w-16 h-16 flex items-center justify-center">
                       <Icon name="upload" size={48} color="#6b7280" />
                     </div>
@@ -822,6 +866,12 @@
                         <Icon name="clipboard-paste" size={18} />
                         Paste from CLI
                       </button>
+                      {IS_GITHUB_HOSTED && (
+                        <label className="inline-block px-6 py-3 bg-emerald-600 text-white rounded-md hover:bg-emerald-700 transition cursor-pointer text-sm font-medium">
+                          Load Bundle
+                          <input type="file" accept=".json,.raftbundle,.txt" onChange={handleBundleUpload} className="hidden" />
+                        </label>
+                      )}
                     </div>
                     <p className="text-gray-500 text-xs mt-4">
                       Running in headless mode? Use "Paste from CLI" to load data from RAFT.
@@ -880,9 +930,9 @@
 
       // Main interface
       return (
-        <div className="min-h-screen bg-gray-50">
+        <div className="h-screen flex flex-col bg-gray-50">
           <Header />
-          <div className="flex" style={{ minHeight: 'calc(100vh - 80px)' }}>
+          <div className="flex flex-1 min-h-0">
             {/* Sidebar */}
             <Sidebar
               patients={patients}
@@ -897,12 +947,14 @@
               qcData={qcData}
               selectedGroup={selectedGroup}
               setSelectedGroup={setSelectedGroup}
+              orderedGroups={orderedGroups}
+              setOrderedGroups={setOrderedGroups}
             />
 
             {/* Main Content */}
-            <div className="flex-1 overflow-y-auto p-4 md:p-6 flex flex-col">
+            <div className="flex-1 min-w-0 flex flex-col min-h-0">
               {viewMode === 'global-settings' ? (
-                <div className="overflow-y-auto flex-1">
+                <div className="flex-1 min-h-0 overflow-y-auto p-4 md:p-6">
                   <GlobalSettings
                     topN={topN} setTopN={setTopN}
                     sortMetric={sortMetric} setSortMetric={setSortMetric}
@@ -912,11 +964,11 @@
                   />
                 </div>
               ) : viewMode === 'cohort-qc' ? (
-                <div className="overflow-y-auto flex-1">
-                  <CohortQCView qcData={qcData} patients={patients} manifestData={manifestData} />
+                <div className="flex-1 min-h-0 overflow-y-auto p-4 md:p-6">
+                  <CohortQCView qcData={qcData} patients={patients} />
                 </div>
               ) : (
-                <div className="flex flex-col flex-1 min-h-0 overflow-y-auto">
+                <div className="flex flex-col flex-1 min-h-0 overflow-y-auto p-4 md:p-6">
                   {/* Patient-level tabs: pMHC vs QC */}
                   <div className="flex-shrink-0 mb-4 sticky top-0 z-10 bg-gray-50 -mx-4 md:-mx-6 px-4 md:px-6 pt-1 pb-2">
                     <div className="flex border-b border-gray-200">
@@ -995,10 +1047,11 @@
 
                   {/* Joint Analysis mode within pMHC tab */}
                   {selectedGroup === 'joint' && patients[selectedPatient]?.isMultiGroup ? (
-                    <div className="flex-1 overflow-y-auto">
+                    <div>
                       <JointAnalysisPanel
                         patient={patients[selectedPatient]}
-                        qcData={qcData[selectedPatient]}
+                        qcData={qcData}
+                        orderedGroups={orderedGroups}
                       />
                     </div>
                   ) : (
@@ -1090,7 +1143,7 @@
                   </React.Fragment>
                   ) : (
                   /* QC Tab Content */
-                  <div className="flex-1 overflow-y-auto">
+                  <div>
                     <QCSummaryDashboard
                       patient={selectedPatient}
                       qcData={qcData}
@@ -1114,7 +1167,16 @@
     );
 
     // Sidebar Component
-    const Sidebar = ({ patients, selectedPatient, setSelectedPatient, setSelectedAlleles, setSelectedAntigenSources, sidebarCollapsed, setSidebarCollapsed, viewMode, setViewMode, qcData, selectedGroup, setSelectedGroup }) => {
+    const Sidebar = ({ patients, selectedPatient, setSelectedPatient, setSelectedAlleles, setSelectedAntigenSources, sidebarCollapsed, setSidebarCollapsed, viewMode, setViewMode, qcData, selectedGroup, setSelectedGroup, orderedGroups, setOrderedGroups }) => {
+      const [sidebarDragIdx, setSidebarDragIdx] = useState(null);
+
+      const handleGroupDrop = (targetIdx) => {
+        if (sidebarDragIdx === null || sidebarDragIdx === targetIdx) return;
+        const newOrder = [...orderedGroups];
+        const [moved] = newOrder.splice(sidebarDragIdx, 1);
+        newOrder.splice(targetIdx, 0, moved);
+        setOrderedGroups(newOrder);
+      };
       const handlePatientClick = (patientId) => {
         setViewMode('patient');
         setSelectedPatient(patientId);
@@ -1150,8 +1212,8 @@
       };
 
       return (
-      <div className={`${sidebarCollapsed ? 'w-16' : 'w-72'} bg-white border-r border-gray-200 overflow-y-auto overflow-x-hidden shadow-sm transition-all duration-300 relative flex-shrink-0`}>
-        {/* Toggle Button */}
+      <div className={`${sidebarCollapsed ? 'w-16' : 'w-72'} bg-white border-r border-gray-200 shadow-sm transition-all duration-300 relative flex-shrink-0 flex flex-col`}>
+        {/* Toggle Button - outside scroll area so it stays fixed */}
         <button
           onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
           className="absolute top-1/2 -right-4 transform -translate-y-1/2 w-8 h-16 rounded-r-lg border-2 border-l-0 border-indigo-500 bg-white cursor-pointer flex items-center justify-center z-50 shadow-md hover:bg-indigo-50 transition text-indigo-600 font-bold text-lg"
@@ -1166,7 +1228,7 @@
             </div>
           </div>
         ) : (
-          <div className="p-4">
+          <div className="p-4 flex-1 min-h-0 overflow-y-auto overflow-x-hidden">
             {/* Global Settings Button */}
             <button
               onClick={() => setViewMode('global-settings')}
@@ -1224,30 +1286,38 @@
                       )}
                     </div>
                     <div className={`text-xs ${isSelected ? 'text-indigo-200' : 'text-gray-500'}`}>
-                      {patient.data.length} pMHCs &bull; {patient.alleles.size} alleles
+                      {patient.data.length} pMHCs &bull; {patient.alleles.size} MHC alleles
                     </div>
                   </button>
 
                   {/* Group sub-navigation for multi-group patients */}
                   {isSelected && patient.isMultiGroup && (
                     <div className="ml-3 mt-1 space-y-1 border-l-2 border-indigo-300 pl-2">
-                      {patient.groups.map(group => (
+                      {orderedGroups.map((group, idx) => (
                         <button
                           key={group}
+                          draggable
+                          onDragStart={() => setSidebarDragIdx(idx)}
+                          onDragOver={(e) => e.preventDefault()}
+                          onDrop={() => handleGroupDrop(idx)}
+                          onDragEnd={() => setSidebarDragIdx(null)}
                           onClick={() => handleGroupClick(patientId, group)}
-                          className={`w-full p-2 text-left text-sm rounded transition ${
+                          className={`w-full p-2 text-left text-sm rounded transition cursor-grab ${
+                            sidebarDragIdx === idx ? 'opacity-40' : ''
+                          } ${
                             selectedGroup === group
                               ? 'bg-indigo-100 text-indigo-700 font-medium'
                               : 'text-gray-600 hover:bg-gray-100'
                           }`}
                         >
-                          <Icon name="folder" size={14} className="inline mr-1" />
+                          <Icon name="grip-vertical" size={12} className="inline mr-0.5 text-gray-400" />
                           {patient.groupLabels?.[group] || group}
                           <span className="text-xs text-gray-400 ml-1">
                             ({patient.groupData[group]?.data.length || 0})
                           </span>
                         </button>
                       ))}
+                      <div className="border-t border-gray-300 my-1"></div>
                       <button
                         onClick={() => handleGroupClick(patientId, 'joint')}
                         className={`w-full p-2 text-left text-sm rounded transition ${
@@ -1363,7 +1433,7 @@
 
     // Patient Controls Component
     const PatientControls = ({
-      selectedPatient, patients, topN, sortMetric,
+      selectedPatient, patients, selectedGroup, topN, sortMetric,
       patientTopN, setPatientTopN, patientSortMetrics, setPatientSortMetrics,
       patientFormulas, setPatientFormulas, globalFormula,
       selectedAntigenSources, toggleAntigenSource,
@@ -1375,6 +1445,9 @@
 
       if (!selectedPatient || !patients[selectedPatient]) return null;
       const patient = patients[selectedPatient];
+      // Use group-specific data when a group is selected
+      const activeData = (patient.isMultiGroup && selectedGroup && selectedGroup !== 'joint' && patient.groupData[selectedGroup])
+        ? patient.groupData[selectedGroup] : patient;
 
       return (
         <div className="bg-white rounded-lg shadow-md p-4 md:p-6 mb-4">
@@ -1394,7 +1467,7 @@
           {/* Patient Overrides */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4 pb-4 border-b border-gray-200">
             <div>
-              <label className="block text-xs font-medium text-gray-700 mb-1">Top N (Override)</label>
+              <label className="block text-xs font-medium text-gray-700 mb-1">Top N</label>
               <input
                 type="number"
                 value={patientTopN[selectedPatient] !== undefined ? patientTopN[selectedPatient] : ''}
@@ -1412,7 +1485,7 @@
               />
             </div>
             <div>
-              <label className="block text-xs font-medium text-gray-700 mb-1">Sort Metric (Override)</label>
+              <label className="block text-xs font-medium text-gray-700 mb-1">Sort Metric</label>
               <select
                 value={patientSortMetrics[selectedPatient] || ''}
                 onChange={(e) => {
@@ -1432,7 +1505,7 @@
 
           {/* Patient Formula */}
           <div className="mb-4">
-            <label className="block text-xs font-medium text-gray-700 mb-1">Custom Formula (Override)</label>
+            <label className="block text-xs font-medium text-gray-700 mb-1">Custom Formula</label>
             <textarea
               value={patientFormulas[selectedPatient] || ''}
               onChange={(e) => setPatientFormulas({...patientFormulas, [selectedPatient]: e.target.value})}
@@ -1444,11 +1517,11 @@
           {/* Antigen Sources */}
           <div className="mb-4">
             <label className="block text-xs font-medium text-gray-700 mb-2">
-              Antigen Sources ({selectedAntigenSources.size} of {patient.antigenSources.size} selected)
+              Antigen Sources ({selectedAntigenSources.size} of {activeData.antigenSources.size} selected)
             </label>
             <div className="flex flex-wrap gap-2">
-              {Array.from(patient.antigenSources).sort().map(source => {
-                const count = patient.data.filter(row => row.antigen_source === source).length;
+              {Array.from(activeData.antigenSources).sort().map(source => {
+                const count = activeData.data.filter(row => row.antigen_source === source).length;
                 const isSelected = selectedAntigenSources.has(source);
                 return (
                   <button
@@ -1471,7 +1544,7 @@
           <div className="mb-4">
             <div className="flex justify-between items-center mb-2">
               <label className="text-xs font-medium text-gray-700">
-                HLA Alleles ({selectedAlleles.size} of {patient.alleles.size} selected)
+                HLA Alleles ({selectedAlleles.size} of {activeData.alleles.size} selected)
               </label>
               <button
                 onClick={() => setShowAlleleTable(!showAlleleTable)}
@@ -1482,7 +1555,7 @@
               </button>
             </div>
             {showAlleleTable && (
-              <AlleleTable alleles={patient.alleles} alleleSupport={patient.alleleSupport} selectedAlleles={selectedAlleles} toggleAllele={toggleAllele} />
+              <AlleleTable alleles={activeData.alleles} alleleSupport={activeData.alleleSupport} selectedAlleles={selectedAlleles} toggleAllele={toggleAllele} />
             )}
           </div>
             </>
@@ -1902,13 +1975,34 @@
       );
     };
 
+    // Format a QC metric value for display
+    const formatQcValue = (value, format) => {
+      if (value === null || value === undefined) return '-';
+      switch (format) {
+        case 'int': return typeof value === 'number' ? value.toLocaleString() : value;
+        case 'pct': return typeof value === 'number' ? (value * 100).toFixed(1) + '%' : value;
+        case 'pct_raw': return typeof value === 'number' ? value.toFixed(1) + '%' : value;
+        case 'float': return typeof value === 'number' ? value.toFixed(2) : value;
+        case 'sci': return typeof value === 'number' ? value.toExponential(2) : value;
+        case 'str': return String(value);
+        default:
+          if (typeof value === 'number') {
+            if (Number.isInteger(value) && Math.abs(value) > 9999) return value.toLocaleString();
+            if (!Number.isInteger(value)) {
+              if (Math.abs(value) < 0.001 && value !== 0) return value.toExponential(2);
+              return parseFloat(value.toPrecision(6)).toString();
+            }
+            return value.toLocaleString();
+          }
+          return String(value);
+      }
+    };
+
     // Cohort QC View Component
-    const CohortQCView = ({ qcData, patients, manifestData }) => {
+    const CohortQCView = ({ qcData, patients }) => {
       const patientIds = Object.keys(patients).sort();
-      const hasMultiGroup = manifestData?.has_multi_group;
-      const allGroups = manifestData?.all_groups || ['default'];
-      const qcPatients = qcData?.patients || {};
-      const hasQcData = Object.keys(qcPatients).length > 0;
+      const summaries = qcData?.summaries || {};
+      const hasSummaries = Object.keys(summaries).length > 0;
 
       if (patientIds.length === 0) {
         return (
@@ -1920,131 +2014,113 @@
         );
       }
 
-      // Count QC tools per patient
-      const getToolCount = (patientId) => {
-        const patQc = qcPatients[patientId];
-        if (!patQc) return 0;
-        let count = 0;
-        for (const runDir of Object.values(patQc)) {
-          count += Object.keys(runDir).length;
-        }
-        return count;
-      };
+      // Build flat list of rows: one per sample per patient (with group info)
+      const sampleRows = useMemo(() => {
+        const rows = [];
+        patientIds.forEach(pid => {
+          const summary = summaries[pid];
+          if (!summary) return;
+          const groups = summary.groups || [];
+          const hasGroups = groups.length > 1;
+
+          // Single-sample entries
+          (summary.samples || []).forEach(sample => {
+            const groupLabel = hasGroups
+              ? (sample.group ? groups.find(g => g.id === sample.group)?.label || sample.group : 'Shared')
+              : '';
+            rows.push({
+              patient: pid,
+              group: groupLabel,
+              sample: sample.run_dir,
+              type: sample.label,
+              metrics: sample.metrics || [],
+              isMulti: false,
+            });
+          });
+
+          // Skip multi-sample entries (run dirs with '+') for the QC table
+        });
+        return rows;
+      }, [patientIds, summaries]);
+
+      // Collect all unique metric labels across all rows to build columns
+      const metricColumns = useMemo(() => {
+        const seen = new Map(); // label -> { category, format }
+        sampleRows.forEach(row => {
+          row.metrics.forEach(m => {
+            if (!seen.has(m.label)) {
+              seen.set(m.label, { category: m.category, format: m.format });
+            }
+          });
+        });
+        // Sort by category then label
+        const cols = [...seen.entries()].map(([label, info]) => ({ label, ...info }));
+        const catOrder = ['Sequencing', 'Alignment', 'RNA Alignment', 'Coverage', 'RNA Quality', 'Germline Variants', 'Variants', 'Variant Calling'];
+        cols.sort((a, b) => {
+          const ai = catOrder.indexOf(a.category);
+          const bi = catOrder.indexOf(b.category);
+          if (ai !== bi) return (ai === -1 ? 99 : ai) - (bi === -1 ? 99 : bi);
+          return a.label.localeCompare(b.label);
+        });
+        return cols;
+      }, [sampleRows]);
 
       return (
         <div className="space-y-6">
-          <div className="bg-white rounded-lg shadow-md p-6">
-            <h2 className="text-xl font-semibold text-gray-800 mb-4 flex items-center gap-2">
-              <Icon name="clipboard-check" size={24} />
-              Cohort Summary{hasMultiGroup ? ' (Multi-Group)' : ''}
-            </h2>
-            <p className="text-sm text-gray-600 mb-6">
-              Overview of {patientIds.length} patients{hasMultiGroup ? ` across ${allGroups.length} groups: ${allGroups.join(', ')}` : ''}.
-            </p>
-
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm border-collapse">
-                <thead>
-                  <tr className="bg-gray-50">
-                    <th className="text-left py-2 px-3 font-semibold text-gray-700 border-b">Patient</th>
-                    {hasMultiGroup ? (
-                      allGroups.map(group => (
-                        <th key={group} colSpan={2} className="text-center py-2 px-3 font-semibold text-gray-700 border-b border-l bg-purple-50">{group}</th>
-                      ))
-                    ) : (
-                      <>
-                        <th className="text-center py-2 px-3 font-semibold text-gray-700 border-b">pMHCs</th>
-                        <th className="text-center py-2 px-3 font-semibold text-gray-700 border-b">Alleles</th>
-                        <th className="text-center py-2 px-3 font-semibold text-gray-700 border-b">Sources</th>
-                      </>
-                    )}
-                    {hasQcData && (
-                      <th className="text-center py-2 px-3 font-semibold text-gray-700 border-b">QC Tools</th>
-                    )}
-                  </tr>
-                  {hasMultiGroup && (
+          {/* QC Metrics Table */}
+          {hasSummaries && sampleRows.length > 0 && (
+            <div className="bg-white rounded-lg shadow-md p-6">
+              <h2 className="text-xl font-semibold text-gray-800 mb-4 flex items-center gap-2">
+                <Icon name="table" size={24} />
+                QC Metrics
+              </h2>
+              <p className="text-sm text-gray-600 mb-4">
+                Per-sample quality control metrics across all patients. Scroll horizontally to see all columns.
+              </p>
+              <div className="overflow-x-auto">
+                <table className="text-xs border-collapse whitespace-nowrap">
+                  <thead>
                     <tr className="bg-gray-50">
-                      <th></th>
-                      {allGroups.map(group => (
-                        <React.Fragment key={group}>
-                          <th className="text-center py-1 px-2 text-xs font-medium text-gray-600 border-b border-l">pMHCs</th>
-                          <th className="text-center py-1 px-2 text-xs font-medium text-gray-600 border-b">Alleles</th>
-                        </React.Fragment>
+                      <th className="text-left py-2 px-2 font-semibold text-gray-700 border-b sticky left-0 bg-gray-50 z-10">Patient</th>
+                      <th className="text-left py-2 px-2 font-semibold text-gray-700 border-b">Group</th>
+                      <th className="text-left py-2 px-2 font-semibold text-gray-700 border-b">Sample</th>
+                      <th className="text-left py-2 px-2 font-semibold text-gray-700 border-b">Type</th>
+                      {metricColumns.map(col => (
+                        <th key={col.label} className="text-right py-2 px-2 font-semibold text-gray-700 border-b border-l" title={col.category}>
+                          {col.label}
+                        </th>
                       ))}
-                      {hasQcData && <th></th>}
                     </tr>
-                  )}
-                </thead>
-                <tbody>
-                  {patientIds.map(patientId => {
-                    const patient = patients[patientId];
-                    const toolCount = getToolCount(patientId);
-                    return (
-                      <tr key={patientId} className="border-b hover:bg-gray-50">
-                        <td className="py-2 px-3 font-medium">
-                          {patientId}
-                          {patient.isMultiGroup && (
-                            <span className="ml-2 text-xs px-1.5 py-0.5 bg-purple-100 text-purple-700 rounded">{patient.groups.length}g</span>
-                          )}
-                        </td>
-                        {hasMultiGroup ? (
-                          allGroups.map(group => {
-                            const hasGroup = patient.isMultiGroup ? patient.groups.includes(group) : group === 'default' || group === allGroups[0];
-                            const groupData = patient.isMultiGroup ? patient.groupData?.[group] : patient;
-                            if (!hasGroup || !groupData) {
-                              return (
-                                <React.Fragment key={group}>
-                                  <td className="py-2 px-2 text-center text-gray-300 border-l">-</td>
-                                  <td className="py-2 px-2 text-center text-gray-300">-</td>
-                                </React.Fragment>
-                              );
-                            }
+                  </thead>
+                  <tbody>
+                    {sampleRows.map((row, idx) => {
+                      // Build metric lookup for this row
+                      const metricMap = {};
+                      row.metrics.forEach(m => { metricMap[m.label] = m; });
+                      return (
+                        <tr key={idx} className="border-b hover:bg-gray-50">
+                          <td className="py-1.5 px-2 font-medium sticky left-0 bg-white z-10">{row.patient}</td>
+                          <td className="py-1.5 px-2 text-gray-600">{row.group || '-'}</td>
+                          <td className="py-1.5 px-2 font-mono text-gray-700">{row.sample}</td>
+                          <td className="py-1.5 px-2 text-gray-600">{row.type}</td>
+                          {metricColumns.map(col => {
+                            const m = metricMap[col.label];
                             return (
-                              <React.Fragment key={group}>
-                                <td className="py-2 px-2 text-center border-l">{groupData.data?.length || 0}</td>
-                                <td className="py-2 px-2 text-center">{groupData.alleles?.size || 0}</td>
-                              </React.Fragment>
+                              <td key={col.label} className="py-1.5 px-2 text-right border-l text-gray-700">
+                                {m ? formatQcValue(m.value, m.format) : '-'}
+                              </td>
                             );
-                          })
-                        ) : (
-                          <>
-                            <td className="py-2 px-3 text-center">{patient.data.length}</td>
-                            <td className="py-2 px-3 text-center">{patient.alleles.size}</td>
-                            <td className="py-2 px-3 text-center">{patient.antigenSources.size}</td>
-                          </>
-                        )}
-                        {hasQcData && (
-                          <td className="py-2 px-3 text-center">
-                            {toolCount > 0 ? (
-                              <span className="text-xs px-2 py-0.5 bg-green-100 text-green-700 rounded">{toolCount} tools</span>
-                            ) : (
-                              <span className="text-xs px-2 py-0.5 bg-gray-100 text-gray-500 rounded">N/A</span>
-                            )}
-                          </td>
-                        )}
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
+                          })}
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
             </div>
-          </div>
+          )}
         </div>
       );
-    };
-
-    // Format a numeric value for display
-    const formatQcValue = (value) => {
-      if (value === null || value === undefined) return '-';
-      if (typeof value === 'number') {
-        if (Number.isInteger(value) && Math.abs(value) > 9999) return value.toLocaleString();
-        if (typeof value === 'number' && !Number.isInteger(value)) {
-          if (Math.abs(value) < 0.001 && value !== 0) return value.toExponential(2);
-          return parseFloat(value.toPrecision(6)).toString();
-        }
-        return value.toLocaleString();
-      }
-      return String(value);
     };
 
     // QC Metrics Table - displays key-value pairs from a parsed tool
@@ -2368,6 +2444,8 @@
     // QC Summary Dashboard - curated per-sample metrics
     const QCSummaryDashboard = ({ patient, qcData }) => {
       const [showInDepth, setShowInDepth] = useState(false);
+      const [selectedQcGroup, setSelectedQcGroup] = useState(null);
+      useEffect(() => { setSelectedQcGroup(null); }, [patient]);
       const summary = qcData?.summaries?.[patient];
       const patientData = qcData?.patients?.[patient];
 
@@ -2598,10 +2676,17 @@
         );
       };
 
-      // Render files section
+      // Render files section (filtered by active group if applicable)
       const renderFilesSection = () => {
-        const { funnel_plots, cnvkit, igv_reports, other_pdfs } = files;
-        const hasFiles = funnel_plots?.length || cnvkit?.length || igv_reports?.length || other_pdfs?.length;
+        const filterByGroup = (fileList) => {
+          if (!hasGroups || !activeQcGroup) return fileList || [];
+          return (fileList || []).filter(f => f.group === activeQcGroup || !f.group);
+        };
+        const funnel_plots = filterByGroup(files.funnel_plots);
+        const cnvkit = filterByGroup(files.cnvkit);
+        const igv_reports = filterByGroup(files.igv_reports);
+        const other_pdfs = filterByGroup(files.other_pdfs);
+        const hasFiles = funnel_plots.length || cnvkit.length || igv_reports.length || other_pdfs.length;
         if (!hasFiles) return null;
 
         return (
@@ -2688,39 +2773,21 @@
       };
 
       // Render grouped or ungrouped view
+      const sharedSamples = hasGroups ? samples.filter(s => !s.group) : [];
+      const activeQcGroup = selectedQcGroup || (hasGroups ? groups[0]?.id : null);
+
       const renderContent = () => {
-        if (hasGroups) {
-          const sharedSamples = samples.filter(s => !s.group);
+        if (hasGroups && activeQcGroup) {
+          const group = groups.find(g => g.id === activeQcGroup);
+          if (!group) return null;
+          const groupSamples = samples.filter(s => s.group === group.id);
+          const groupMulti = multi_sample.filter(ms => ms.group === group.id);
           return (
-            <React.Fragment>
-              {groups.map(group => {
-                const groupSamples = samples.filter(s => s.group === group.id);
-                const groupMulti = multi_sample.filter(ms => ms.group === group.id);
-                return (
-                  <div key={group.id} className="mb-6">
-                    <div className="flex items-center gap-2 mb-3 pb-2 border-b border-purple-200">
-                      <Icon name="folder" size={18} className="text-purple-600" />
-                      <span className="font-semibold text-purple-800">{group.label}</span>
-                    </div>
-                    <div className="space-y-3">
-                      {groupSamples.map(renderSampleCard)}
-                      {groupMulti.map(renderMultiSampleCard)}
-                    </div>
-                  </div>
-                );
-              })}
-              {sharedSamples.length > 0 && (
-                <div className="mb-6">
-                  <div className="flex items-center gap-2 mb-3 pb-2 border-b border-gray-300">
-                    <Icon name="layers" size={18} className="text-gray-600" />
-                    <span className="font-semibold text-gray-700">Shared Among Groups</span>
-                  </div>
-                  <div className="space-y-3">
-                    {sharedSamples.map(renderSampleCard)}
-                  </div>
-                </div>
-              )}
-            </React.Fragment>
+            <div className="space-y-3">
+              {groupSamples.map(renderSampleCard)}
+              {sharedSamples.map(renderSampleCard)}
+              {groupMulti.map(renderMultiSampleCard)}
+            </div>
           );
         }
         return (
@@ -2740,6 +2807,32 @@
               <span className="text-sm text-amber-800">
                 Groups were auto-detected from file names. Load a manifest for definitive grouping.
               </span>
+            </div>
+          )}
+          {/* Group sub-tabs for QC */}
+          {hasGroups && groups.length > 1 && (
+            <div className="flex flex-wrap gap-1 bg-gray-100 p-1 rounded-lg">
+              {groups.map(group => {
+                const groupSampleCount = samples.filter(s => s.group === group.id).length + sharedSamples.length;
+                const groupMultiCount = multi_sample.filter(ms => ms.group === group.id).length;
+                return (
+                  <button
+                    key={group.id}
+                    onClick={() => setSelectedQcGroup(group.id)}
+                    className={`px-3 py-1.5 text-sm font-medium rounded-md transition ${
+                      activeQcGroup === group.id
+                        ? 'bg-white text-emerald-700 shadow-sm'
+                        : 'text-gray-600 hover:text-gray-800'
+                    }`}
+                  >
+                    <Icon name="folder" size={14} className="inline mr-1" />
+                    {group.label}
+                    <span className="text-xs text-gray-400 ml-1">
+                      ({groupSampleCount + groupMultiCount})
+                    </span>
+                  </button>
+                );
+              })}
             </div>
           )}
           <div className="bg-white rounded-lg shadow-md p-6">
@@ -2847,7 +2940,7 @@
     };
 
     // Joint Analysis Panel Component (for multi-group patients)
-    const JointAnalysisPanel = ({ patient, qcData }) => {
+    const JointAnalysisPanel = ({ patient, qcData, orderedGroups }) => {
       const [activeSection, setActiveSection] = useState('sharedness');
 
       if (!patient || !patient.isMultiGroup || patient.groups.length < 2) {
@@ -2862,8 +2955,6 @@
         );
       }
 
-      const groups = patient.groups;
-
       return (
         <div className="space-y-6">
           <div className="bg-white rounded-lg shadow-md p-6">
@@ -2872,7 +2963,7 @@
               Joint Analysis: {patient.id}
             </h2>
             <p className="text-sm text-gray-600 mb-4">
-              Comparing {groups.length} groups: {groups.join(' vs ')}
+              Comparing {orderedGroups.length} groups: {orderedGroups.join(' → ')}
             </p>
 
             {/* Section tabs */}
@@ -2899,18 +2990,17 @@
             </div>
 
             {/* Section content */}
-            {activeSection === 'sharedness' && <VennDiagramSection patient={patient} />}
-            {activeSection === 'expression' && <ExpressionComparisonSection patient={patient} />}
-            {activeSection === 'gainloss' && <GainedLostSection patient={patient} />}
-            {activeSection === 'allelic' && <AllelicConsistencySection patient={patient} />}
+            {activeSection === 'sharedness' && <VennDiagramSection patient={patient} groups={orderedGroups} />}
+            {activeSection === 'expression' && <ExpressionComparisonSection patient={patient} qcData={qcData} groups={orderedGroups} />}
+            {activeSection === 'gainloss' && <GainedLostSection patient={patient} groups={orderedGroups} />}
+            {activeSection === 'allelic' && <AllelicConsistencySection patient={patient} groups={orderedGroups} />}
           </div>
         </div>
       );
     };
 
     // Venn Diagram Section - pMHC Sharedness
-    const VennDiagramSection = ({ patient }) => {
-      const groups = patient.groups;
+    const VennDiagramSection = ({ patient, groups }) => {
 
       const analysis = useMemo(() => {
         // Build peptide-allele sets for each group
@@ -3017,47 +3107,70 @@
     };
 
     // Expression Comparison Section
-    const ExpressionComparisonSection = ({ patient }) => {
-      const groups = patient.groups;
+    const ExpressionComparisonSection = ({ patient, qcData, groups }) => {
 
-      const comparison = useMemo(() => {
-        if (groups.length < 2) return { data: [], hasExpression: false };
+      // Build pairwise comparisons for consecutive groups
+      const pairComparisons = useMemo(() => {
+        if (groups.length < 2) return [];
 
-        const [g1, g2] = groups;
-        const data1 = patient.groupData[g1]?.data || [];
-        const data2 = patient.groupData[g2]?.data || [];
+        const pairs = [];
+        for (let i = 0; i < groups.length - 1; i++) {
+          const g1 = groups[i], g2 = groups[i + 1];
+          let geneTPM1, geneTPM2;
+          let dataSource = 'lens';
 
-        // Index data2 by peptide-allele
-        const index2 = new Map();
-        data2.forEach(row => index2.set(`${row.peptide}|${row.allele}`, row));
+          // Try Salmon quant.sf gene-level TPMs from QC summaries
+          const summary = qcData?.summaries?.[patient.id];
+          if (summary?.samples) {
+            let salmon1 = null, salmon2 = null;
+            for (const sample of summary.samples) {
+              if (sample.salmon_gene_tpm && sample.run_dir?.startsWith('ar-')) {
+                if (sample.group === g1) salmon1 = sample.salmon_gene_tpm;
+                if (sample.group === g2) salmon2 = sample.salmon_gene_tpm;
+              }
+            }
+            if (salmon1 && salmon2) {
+              geneTPM1 = new Map(Object.entries(salmon1));
+              geneTPM2 = new Map(Object.entries(salmon2));
+              dataSource = 'salmon';
+            }
+          }
 
-        // Find matching peptides and compute fold changes
-        const compared = [];
-        data1.forEach(row1 => {
-          const key = `${row1.peptide}|${row1.allele}`;
-          const row2 = index2.get(key);
-          if (row2) {
-            const tpm1 = parseFloat(row1.tpm) || 0;
-            const tpm2 = parseFloat(row2.tpm) || 0;
-            const log2fc = (tpm1 > 0 && tpm2 > 0) ? Math.log2(tpm2 / tpm1) : 0;
-            compared.push({
-              peptide: row1.peptide,
-              allele: row1.allele,
-              tpm1, tpm2, log2fc,
-              vaf1: parseFloat(row1.vaf) || 0,
-              vaf2: parseFloat(row2.vaf) || 0
+          // Fall back to LENS TPM if no Salmon data
+          if (!geneTPM1) {
+            const data1 = patient.groupData[g1]?.data || [];
+            const data2 = patient.groupData[g2]?.data || [];
+            geneTPM1 = new Map();
+            data1.forEach(row => {
+              const gene = row.gene_name;
+              const tpm = parseFloat(row.gene_tpm || row.tpm) || 0;
+              if (!geneTPM1.has(gene) || tpm > geneTPM1.get(gene)) geneTPM1.set(gene, tpm);
+            });
+            geneTPM2 = new Map();
+            data2.forEach(row => {
+              const gene = row.gene_name;
+              const tpm = parseFloat(row.gene_tpm || row.tpm) || 0;
+              if (!geneTPM2.has(gene) || tpm > geneTPM2.get(gene)) geneTPM2.set(gene, tpm);
             });
           }
-        });
 
-        // Sort by absolute fold change
-        compared.sort((a, b) => Math.abs(b.log2fc) - Math.abs(a.log2fc));
+          const compared = [];
+          geneTPM1.forEach((tpm1, gene) => {
+            const tpm2 = geneTPM2.get(gene);
+            if (tpm2 !== undefined) {
+              const log2fc = (tpm1 > 0 && tpm2 > 0) ? Math.log2(tpm2 / tpm1) : 0;
+              compared.push({ gene, tpm1, tpm2, log2fc });
+            }
+          });
+          compared.sort((a, b) => Math.abs(b.log2fc) - Math.abs(a.log2fc));
 
-        const hasExpression = compared.some(c => c.tpm1 > 0 || c.tpm2 > 0);
-        return { data: compared, hasExpression, g1, g2 };
-      }, [patient, groups]);
+          const hasExpression = compared.some(c => c.tpm1 > 0 || c.tpm2 > 0);
+          pairs.push({ data: compared, hasExpression, g1, g2, dataSource });
+        }
+        return pairs;
+      }, [patient, groups, qcData]);
 
-      if (!comparison.hasExpression) {
+      if (pairComparisons.length === 0 || !pairComparisons.some(p => p.hasExpression)) {
         return (
           <div className="text-center py-8">
             <Icon name="bar-chart-2" size={48} color="#9ca3af" className="mx-auto mb-4" />
@@ -3067,148 +3180,184 @@
       }
 
       return (
-        <div>
-          <h3 className="text-lg font-semibold text-gray-800 mb-4">Expression Changes ({comparison.g1} → {comparison.g2})</h3>
+        <div className="space-y-8">
+          {pairComparisons.map((comparison, pairIdx) => (
+            <div key={`${comparison.g1}-${comparison.g2}`}>
+              <h3 className="text-lg font-semibold text-gray-800 mb-4">
+                Expression Changes ({comparison.g1} → {comparison.g2})
+                {comparison.dataSource === 'salmon' ? (
+                  <span className="ml-2 text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full font-normal">
+                    Salmon quant.sf ({comparison.data.length.toLocaleString()} genes)
+                  </span>
+                ) : (
+                  <span className="ml-2 text-xs bg-gray-100 text-gray-500 px-2 py-0.5 rounded-full font-normal">
+                    LENS TPM
+                  </span>
+                )}
+              </h3>
 
-          {/* Summary */}
-          <div className="grid grid-cols-3 gap-4 mb-6">
-            <div className="bg-red-50 border border-red-200 rounded-lg p-4 text-center">
-              <div className="text-2xl font-bold text-red-700">
-                {comparison.data.filter(d => d.log2fc < -1).length}
+              <div className="grid grid-cols-3 gap-4 mb-6">
+                <div className="bg-red-50 border border-red-200 rounded-lg p-4 text-center">
+                  <div className="text-2xl font-bold text-red-700">
+                    {comparison.data.filter(d => d.log2fc < -1).length}
+                  </div>
+                  <div className="text-sm text-red-600">Downregulated</div>
+                  <div className="text-xs text-red-500">(log2FC &lt; -1)</div>
+                </div>
+                <div className="bg-gray-50 border border-gray-200 rounded-lg p-4 text-center">
+                  <div className="text-2xl font-bold text-gray-700">
+                    {comparison.data.filter(d => d.log2fc >= -1 && d.log2fc <= 1).length}
+                  </div>
+                  <div className="text-sm text-gray-600">Stable</div>
+                  <div className="text-xs text-gray-500">(|log2FC| ≤ 1)</div>
+                </div>
+                <div className="bg-green-50 border border-green-200 rounded-lg p-4 text-center">
+                  <div className="text-2xl font-bold text-green-700">
+                    {comparison.data.filter(d => d.log2fc > 1).length}
+                  </div>
+                  <div className="text-sm text-green-600">Upregulated</div>
+                  <div className="text-xs text-green-500">(log2FC &gt; 1)</div>
+                </div>
               </div>
-              <div className="text-sm text-red-600">Downregulated</div>
-              <div className="text-xs text-red-500">(log2FC &lt; -1)</div>
-            </div>
-            <div className="bg-gray-50 border border-gray-200 rounded-lg p-4 text-center">
-              <div className="text-2xl font-bold text-gray-700">
-                {comparison.data.filter(d => d.log2fc >= -1 && d.log2fc <= 1).length}
-              </div>
-              <div className="text-sm text-gray-600">Stable</div>
-              <div className="text-xs text-gray-500">(|log2FC| ≤ 1)</div>
-            </div>
-            <div className="bg-green-50 border border-green-200 rounded-lg p-4 text-center">
-              <div className="text-2xl font-bold text-green-700">
-                {comparison.data.filter(d => d.log2fc > 1).length}
-              </div>
-              <div className="text-sm text-green-600">Upregulated</div>
-              <div className="text-xs text-green-500">(log2FC &gt; 1)</div>
-            </div>
-          </div>
 
-          {/* Top changes table */}
-          <div className="bg-gray-50 rounded-lg p-4 max-h-80 overflow-y-auto">
-            <h4 className="text-sm font-semibold text-gray-700 mb-3">Top Expression Changes</h4>
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b border-gray-300">
-                  <th className="text-left py-2">Peptide</th>
-                  <th className="text-left py-2">Allele</th>
-                  <th className="text-right py-2">{comparison.g1} TPM</th>
-                  <th className="text-right py-2">{comparison.g2} TPM</th>
-                  <th className="text-right py-2">Log2 FC</th>
-                </tr>
-              </thead>
-              <tbody>
-                {comparison.data.slice(0, 20).map((row, idx) => (
-                  <tr key={idx} className="border-b border-gray-200">
-                    <td className="py-2 font-mono text-xs">{row.peptide}</td>
-                    <td className="py-2 font-mono text-xs">{row.allele}</td>
-                    <td className="py-2 text-right">{row.tpm1.toFixed(2)}</td>
-                    <td className="py-2 text-right">{row.tpm2.toFixed(2)}</td>
-                    <td className={`py-2 text-right font-semibold ${row.log2fc > 1 ? 'text-green-600' : row.log2fc < -1 ? 'text-red-600' : 'text-gray-600'}`}>
-                      {row.log2fc.toFixed(2)}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+              <div className="bg-gray-50 rounded-lg p-4 max-h-80 overflow-y-auto">
+                <h4 className="text-sm font-semibold text-gray-700 mb-3">Top Expression Changes</h4>
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b border-gray-300">
+                      <th className="text-left py-2">Gene</th>
+                      <th className="text-right py-2">{comparison.g1} TPM</th>
+                      <th className="text-right py-2">{comparison.g2} TPM</th>
+                      <th className="text-right py-2">Log2 FC</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {comparison.data.slice(0, 20).map((row, idx) => (
+                      <tr key={idx} className="border-b border-gray-200">
+                        <td className="py-2 font-mono text-xs">{row.gene}</td>
+                        <td className="py-2 text-right">{row.tpm1.toFixed(2)}</td>
+                        <td className="py-2 text-right">{row.tpm2.toFixed(2)}</td>
+                        <td className={`py-2 text-right font-semibold ${row.log2fc > 1 ? 'text-green-600' : row.log2fc < -1 ? 'text-red-600' : 'text-gray-600'}`}>
+                          {row.log2fc.toFixed(2)}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              {pairIdx < pairComparisons.length - 1 && (
+                <hr className="my-6 border-gray-200" />
+              )}
+            </div>
+          ))}
         </div>
       );
     };
 
     // Gained/Lost Antigens Section
-    const GainedLostSection = ({ patient }) => {
-      const groups = patient.groups;
+    const GainedLostSection = ({ patient, groups }) => {
 
-      const analysis = useMemo(() => {
-        if (groups.length < 2) return { gained: [], lost: [], retained: [] };
+      // Build pairwise analyses for consecutive groups
+      const pairAnalyses = useMemo(() => {
+        if (groups.length < 2) return [];
 
-        const [g1, g2] = groups;
-        const peptides1 = new Set((patient.groupData[g1]?.data || []).map(r => r.peptide));
-        const peptides2 = new Set((patient.groupData[g2]?.data || []).map(r => r.peptide));
+        const pairs = [];
+        for (let i = 0; i < groups.length - 1; i++) {
+          const g1 = groups[i], g2 = groups[i + 1];
+          const peptides1 = new Set((patient.groupData[g1]?.data || []).map(r => r.peptide));
+          const peptides2 = new Set((patient.groupData[g2]?.data || []).map(r => r.peptide));
 
-        const gained = [...peptides2].filter(p => !peptides1.has(p));
-        const lost = [...peptides1].filter(p => !peptides2.has(p));
-        const retained = [...peptides1].filter(p => peptides2.has(p));
+          const gained = [...peptides2].filter(p => !peptides1.has(p)).sort();
+          const lost = [...peptides1].filter(p => !peptides2.has(p)).sort();
+          const retained = [...peptides1].filter(p => peptides2.has(p)).sort();
 
-        return { gained, lost, retained, g1, g2 };
+          pairs.push({ gained, lost, retained, g1, g2 });
+        }
+        return pairs;
       }, [patient, groups]);
 
+      if (pairAnalyses.length === 0) return null;
+
       return (
-        <div>
-          <h3 className="text-lg font-semibold text-gray-800 mb-4">Antigen Changes ({analysis.g1} → {analysis.g2})</h3>
+        <div className="space-y-8">
+          {pairAnalyses.map((analysis, pairIdx) => (
+            <div key={`${analysis.g1}-${analysis.g2}`}>
+              <h3 className="text-lg font-semibold text-gray-800 mb-4">Antigen Changes ({analysis.g1} → {analysis.g2})</h3>
 
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
-            {/* Lost */}
-            <div className="bg-red-50 border border-red-200 rounded-lg p-4">
-              <div className="flex items-center gap-2 mb-3">
-                <Icon name="minus-circle" size={20} className="text-red-600" />
-                <span className="font-semibold text-red-800">Lost Antigens</span>
-                <span className="ml-auto text-2xl font-bold text-red-700">{analysis.lost.length}</span>
-              </div>
-              <div className="max-h-40 overflow-y-auto">
-                {analysis.lost.length > 0 ? (
-                  <div className="flex flex-wrap gap-1">
-                    {analysis.lost.slice(0, 30).map(p => (
-                      <span key={p} className="px-2 py-0.5 bg-red-100 text-red-700 rounded text-xs font-mono">{p}</span>
-                    ))}
-                    {analysis.lost.length > 30 && <span className="text-xs text-red-500">+{analysis.lost.length - 30} more</span>}
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+                {/* Lost */}
+                <div className="bg-red-50 border border-red-200 rounded-lg p-4">
+                  <div className="flex items-center gap-2 mb-3">
+                    <Icon name="minus-circle" size={20} className="text-red-600" />
+                    <span className="font-semibold text-red-800">Lost Antigens</span>
+                    <span className="ml-auto text-2xl font-bold text-red-700">{analysis.lost.length}</span>
                   </div>
-                ) : (
-                  <p className="text-sm text-red-400">No antigens lost</p>
-                )}
-              </div>
-            </div>
-
-            {/* Retained */}
-            <div className="bg-gray-50 border border-gray-200 rounded-lg p-4">
-              <div className="flex items-center gap-2 mb-3">
-                <Icon name="check-circle" size={20} className="text-gray-600" />
-                <span className="font-semibold text-gray-800">Retained</span>
-                <span className="ml-auto text-2xl font-bold text-gray-700">{analysis.retained.length}</span>
-              </div>
-              <p className="text-sm text-gray-500">Present in both groups</p>
-            </div>
-
-            {/* Gained */}
-            <div className="bg-green-50 border border-green-200 rounded-lg p-4">
-              <div className="flex items-center gap-2 mb-3">
-                <Icon name="plus-circle" size={20} className="text-green-600" />
-                <span className="font-semibold text-green-800">Gained Antigens</span>
-                <span className="ml-auto text-2xl font-bold text-green-700">{analysis.gained.length}</span>
-              </div>
-              <div className="max-h-40 overflow-y-auto">
-                {analysis.gained.length > 0 ? (
-                  <div className="flex flex-wrap gap-1">
-                    {analysis.gained.slice(0, 30).map(p => (
-                      <span key={p} className="px-2 py-0.5 bg-green-100 text-green-700 rounded text-xs font-mono">{p}</span>
-                    ))}
-                    {analysis.gained.length > 30 && <span className="text-xs text-green-500">+{analysis.gained.length - 30} more</span>}
+                  <div className="max-h-60 overflow-y-auto">
+                    {analysis.lost.length > 0 ? (
+                      <div className="space-y-0.5">
+                        {analysis.lost.map(p => (
+                          <div key={p} className="text-xs font-mono text-red-700">{p}</div>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="text-sm text-red-400">No antigens lost</p>
+                    )}
                   </div>
-                ) : (
-                  <p className="text-sm text-green-400">No new antigens gained</p>
-                )}
+                </div>
+
+                {/* Retained */}
+                <div className="bg-gray-50 border border-gray-200 rounded-lg p-4">
+                  <div className="flex items-center gap-2 mb-3">
+                    <Icon name="check-circle" size={20} className="text-gray-600" />
+                    <span className="font-semibold text-gray-800">Retained</span>
+                    <span className="ml-auto text-2xl font-bold text-gray-700">{analysis.retained.length}</span>
+                  </div>
+                  <div className="max-h-60 overflow-y-auto">
+                    {analysis.retained.length > 0 ? (
+                      <div className="space-y-0.5">
+                        {analysis.retained.map(p => (
+                          <div key={p} className="text-xs font-mono text-gray-700">{p}</div>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="text-sm text-gray-500">No shared antigens</p>
+                    )}
+                  </div>
+                </div>
+
+                {/* Gained */}
+                <div className="bg-green-50 border border-green-200 rounded-lg p-4">
+                  <div className="flex items-center gap-2 mb-3">
+                    <Icon name="plus-circle" size={20} className="text-green-600" />
+                    <span className="font-semibold text-green-800">Gained Antigens</span>
+                    <span className="ml-auto text-2xl font-bold text-green-700">{analysis.gained.length}</span>
+                  </div>
+                  <div className="max-h-60 overflow-y-auto">
+                    {analysis.gained.length > 0 ? (
+                      <div className="space-y-0.5">
+                        {analysis.gained.map(p => (
+                          <div key={p} className="text-xs font-mono text-green-700">{p}</div>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="text-sm text-green-400">No new antigens gained</p>
+                    )}
+                  </div>
+                </div>
               </div>
+
+              {pairIdx < pairAnalyses.length - 1 && (
+                <hr className="my-6 border-gray-200" />
+              )}
             </div>
-          </div>
+          ))}
         </div>
       );
     };
 
     // Allelic Consistency Section (LOH Detection)
-    const AllelicConsistencySection = ({ patient }) => {
-      const groups = patient.groups;
+    const AllelicConsistencySection = ({ patient, groups }) => {
 
       const analysis = useMemo(() => {
         // Collect alleles from each group
@@ -3303,9 +3452,9 @@
                       {groups.map(g => (
                         <td key={g} className="py-2 text-center">
                           {analysis.allelesByGroup[g].has(allele) ? (
-                            <Icon name="check" size={16} className="text-green-600 mx-auto" />
+                            <span className="text-green-600 font-bold">&#10003;</span>
                           ) : (
-                            <Icon name="x" size={16} className="text-red-600 mx-auto" />
+                            <span className="text-red-600 font-bold">&#10007;</span>
                           )}
                         </td>
                       ))}
@@ -3354,10 +3503,217 @@
       return String(value);
     };
 
+    // Source-specific field definitions per antigen_source
+    const SOURCE_FIELDS = {
+      SNV: [
+        { key: 'chromosome', label: 'Chromosome' },
+        { key: 'start', label: 'Position' },
+        { key: 'consequence', label: 'Consequence' },
+        { key: 'impact', label: 'Impact' },
+      ],
+      Indel: [
+        { key: 'chromosome', label: 'Chromosome' },
+        { key: 'start', label: 'Position' },
+        { key: 'consequence', label: 'Consequence' },
+        { key: 'impact', label: 'Impact' },
+      ],
+      Fusion: [
+        { key: 'fusion_partner_5', label: "5\u2032 Partner" },
+        { key: 'fusion_partner_3', label: "3\u2032 Partner" },
+        { key: 'fusion_type', label: 'Fusion Type' },
+        { key: 'fusion_support_reads', label: 'Support Reads' },
+      ],
+      Virus: [
+        { key: 'virus_name', label: 'Virus' },
+        { key: 'virus_strain', label: 'Strain' },
+      ],
+      ERV: [
+        { key: 'erv_name', label: 'ERV Name' },
+        { key: 'erv_family', label: 'Family' },
+        { key: 'erv_locus', label: 'Locus' },
+      ],
+      Splice: [
+        { key: 'splice_type', label: 'Splice Type' },
+        { key: 'splice_site', label: 'Splice Site' },
+        { key: 'splice_effect', label: 'Effect' },
+      ],
+      CTA: [
+        { key: 'cta_gene', label: 'Gene' },
+        { key: 'cta_transcript', label: 'Transcript' },
+        { key: 'cta_tissue_specificity', label: 'Tissue Specificity' },
+      ],
+    };
+
+    // HPA Tissue Expression Bar Chart (D3)
+    const HPABarChart = ({ tissues }) => {
+      const svgRef = React.useRef(null);
+      const reproTissues = new Set(['testis', 'ovary', 'placenta', 'endometrium', 'fallopian tube', 'seminal vesicle', 'epididymis', 'prostate']);
+
+      React.useEffect(() => {
+        if (!svgRef.current || !tissues?.length) return;
+        const data = tissues.slice(0, 15);
+        const margin = { top: 5, right: 30, bottom: 20, left: 120 };
+        const width = 400 - margin.left - margin.right;
+        const height = data.length * 20;
+
+        const svg = d3.select(svgRef.current);
+        svg.selectAll('*').remove();
+        svg.attr('width', width + margin.left + margin.right)
+           .attr('height', height + margin.top + margin.bottom);
+
+        const g = svg.append('g').attr('transform', `translate(${margin.left},${margin.top})`);
+
+        const x = d3.scaleLinear().domain([0, d3.max(data, d => d.tpm) || 1]).range([0, width]);
+        const y = d3.scaleBand().domain(data.map(d => d.tissue)).range([0, height]).padding(0.2);
+
+        g.selectAll('.bar').data(data).join('rect')
+          .attr('class', 'bar')
+          .attr('x', 0).attr('y', d => y(d.tissue))
+          .attr('width', d => x(d.tpm)).attr('height', y.bandwidth())
+          .attr('fill', d => reproTissues.has(d.tissue.toLowerCase()) ? '#7c3aed' : '#6366f1')
+          .attr('rx', 2);
+
+        g.selectAll('.label').data(data).join('text')
+          .attr('x', d => x(d.tpm) + 3).attr('y', d => y(d.tissue) + y.bandwidth() / 2)
+          .attr('dy', '0.35em').attr('font-size', '10px').attr('fill', '#4b5563')
+          .text(d => d.tpm.toFixed(1));
+
+        g.append('g').selectAll('.tissue').data(data).join('text')
+          .attr('x', -4).attr('y', d => y(d.tissue) + y.bandwidth() / 2)
+          .attr('dy', '0.35em').attr('text-anchor', 'end').attr('font-size', '10px')
+          .attr('fill', d => reproTissues.has(d.tissue.toLowerCase()) ? '#7c3aed' : '#374151')
+          .attr('font-weight', d => reproTissues.has(d.tissue.toLowerCase()) ? '600' : '400')
+          .text(d => d.tissue.length > 18 ? d.tissue.slice(0, 16) + '...' : d.tissue);
+
+        g.append('g').attr('transform', `translate(0,${height})`).call(d3.axisBottom(x).ticks(4).tickSize(3))
+          .selectAll('text').attr('font-size', '9px');
+      }, [tissues]);
+
+      if (!tissues?.length) return <div className="text-xs text-gray-400 italic">No tissue data available</div>;
+      return (
+        <div>
+          <div className="text-xs font-medium text-gray-600 mb-1">RNA Tissue Expression (nTPM)</div>
+          <svg ref={svgRef}></svg>
+          <div className="flex gap-3 mt-1 text-xs text-gray-400">
+            <span><span className="inline-block w-2 h-2 rounded-sm mr-0.5" style={{backgroundColor:'#7c3aed'}}></span> Reproductive</span>
+            <span><span className="inline-block w-2 h-2 rounded-sm mr-0.5" style={{backgroundColor:'#6366f1'}}></span> Other</span>
+          </div>
+        </div>
+      );
+    };
+
+    // ClinVar Summary Component
+    const ClinVarSummary = ({ data }) => {
+      if (!data?.results?.length) return <div className="text-xs text-gray-400 italic">No ClinVar entries found</div>;
+      const sigColors = {
+        'pathogenic': 'bg-red-100 text-red-700',
+        'likely pathogenic': 'bg-red-50 text-red-600',
+        'uncertain significance': 'bg-yellow-100 text-yellow-700',
+        'likely benign': 'bg-green-50 text-green-600',
+        'benign': 'bg-green-100 text-green-700',
+      };
+      return (
+        <div>
+          <div className="text-xs font-medium text-gray-600 mb-1">ClinVar Annotations</div>
+          <div className="space-y-1.5">
+            {data.results.slice(0, 3).map((r, i) => (
+              <div key={i} className="flex flex-wrap items-center gap-1.5 text-xs">
+                <span className={`px-1.5 py-0.5 rounded font-medium ${sigColors[r.clinical_significance?.toLowerCase()] || 'bg-gray-100 text-gray-600'}`}>
+                  {r.clinical_significance || 'Unknown'}
+                </span>
+                {r.accession && <a href={`https://www.ncbi.nlm.nih.gov/clinvar/variation/${r.accession}/`} target="_blank" rel="noopener" className="text-blue-600 hover:underline" onClick={e => e.stopPropagation()}>{r.accession}</a>}
+                {r.conditions?.length > 0 && <span className="text-gray-500">{r.conditions.join(', ')}</span>}
+              </div>
+            ))}
+          </div>
+        </div>
+      );
+    };
+
+    // Reference Links Component
+    const ReferenceLinks = ({ data }) => {
+      if (!data?.links?.length) return null;
+      return (
+        <div>
+          <div className="text-xs font-medium text-gray-600 mb-1">External References</div>
+          <div className="flex flex-wrap gap-1.5">
+            {data.links.map((link, i) => (
+              <a key={i} href={link.url} target="_blank" rel="noopener"
+                onClick={e => e.stopPropagation()}
+                className="inline-block px-2 py-0.5 text-xs bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-full transition">
+                {link.name} <Icon name="external-link" size={10} className="inline ml-0.5" />
+              </a>
+            ))}
+          </div>
+        </div>
+      );
+    };
+
+    // Expanded Card Content — fetches external data and shows source details
+    const ExpandedCardContent = ({ row }) => {
+      const [hpaData, setHpaData] = useState(null);
+      const [clinvarData, setClinvarData] = useState(null);
+      const [linksData, setLinksData] = useState(null);
+      const [loading, setLoading] = useState(true);
+
+      React.useEffect(() => {
+        let cancelled = false;
+        const gene = row.cta_gene || row.gene_name || '';
+        const source = row.antigen_source || '';
+
+        const fetches = [];
+
+        // HPA for CTA
+        if (source === 'CTA' && gene) {
+          fetches.push(
+            fetch(`/api/external/hpa?gene=${encodeURIComponent(gene)}`)
+              .then(r => r.json()).then(d => { if (!cancelled) setHpaData(d); })
+              .catch(() => {})
+          );
+        }
+
+        // ClinVar for SNV/Indel
+        if ((source === 'SNV' || source === 'Indel') && gene) {
+          const variant = row.protein_change || '';
+          fetches.push(
+            fetch(`/api/external/clinvar?gene=${encodeURIComponent(gene)}&variant=${encodeURIComponent(variant)}`)
+              .then(r => r.json()).then(d => { if (!cancelled) setClinvarData(d); })
+              .catch(() => {})
+          );
+        }
+
+        // Links for all
+        if (gene) {
+          fetches.push(
+            fetch(`/api/external/links?gene=${encodeURIComponent(gene)}&source=${encodeURIComponent(source)}`)
+              .then(r => r.json()).then(d => { if (!cancelled) setLinksData(d); })
+              .catch(() => {})
+          );
+        }
+
+        Promise.allSettled(fetches).then(() => { if (!cancelled) setLoading(false); });
+        return () => { cancelled = true; };
+      }, [row]);
+
+      return (
+        <div className="mb-3 p-3 bg-blue-50 rounded-md border border-blue-100 space-y-3" onClick={e => e.stopPropagation()}>
+          <div className="text-xs font-semibold text-blue-800 uppercase tracking-wide">Detailed Information</div>
+          {loading && <div className="flex items-center gap-2 text-xs text-gray-500"><Icon name="loader-2" size={12} className="animate-spin" /> Loading external data...</div>}
+          {hpaData && <HPABarChart tissues={hpaData.tissues} />}
+          {clinvarData && <ClinVarSummary data={clinvarData} />}
+          {linksData && <ReferenceLinks data={linksData} />}
+          {!loading && !hpaData && !clinvarData && !linksData?.links?.length && (
+            <div className="text-xs text-gray-400 italic">No external data available for this entry.</div>
+          )}
+        </div>
+      );
+    };
+
     // pMHC Card Component
     const PMHCCard = ({ row, idx, sortMetric, comments, setComments, isSelected, onSelect, hasCustomFormula, tumorType, tumorSubtype }) => {
       const key = `${row.peptide}-${row.allele}`;
-      const displayValue = (v) => { if (v === null || v === undefined || v === '' || v === 'NA') return 'N/A'; const num = parseFloat(v); return isNaN(num) ? 'N/A' : num.toFixed(3); };
+      const [expanded, setExpanded] = useState(false);
+      const sourceFields = SOURCE_FIELDS[row.antigen_source] || [];
       const antigenSource = (row.antigen_source || '').toLowerCase();
       const isSNV = antigenSource.includes('snv');
       const isIndel = antigenSource.includes('indel');
@@ -3379,23 +3735,44 @@
           <div className="flex justify-between items-start mb-3">
             <div>
               <div className="text-lg font-bold text-gray-800 mb-0.5 font-mono">{row.peptide}</div>
-              <div className="text-sm text-gray-500 font-mono">{row.allele} &bull; {row.antigen_source}</div>
+              <div className="text-sm text-gray-500 font-mono">{row.allele} &bull;{' '}
+                <span className={`inline-block px-1.5 py-0.5 rounded text-xs font-medium ${
+                  row.antigen_source === 'CTA' ? 'bg-purple-100 text-purple-700' :
+                  row.antigen_source === 'Fusion' ? 'bg-orange-100 text-orange-700' :
+                  row.antigen_source === 'Virus' ? 'bg-red-100 text-red-700' :
+                  row.antigen_source === 'ERV' ? 'bg-yellow-100 text-yellow-700' :
+                  row.antigen_source === 'Splice' ? 'bg-teal-100 text-teal-700' :
+                  'bg-blue-100 text-blue-700'
+                }`}>{row.antigen_source}</span>
+              </div>
             </div>
-            <div className="bg-indigo-600 text-white px-3 py-1 rounded-full text-sm font-bold">#{idx + 1}</div>
+            <div className="flex items-center gap-2">
+              <button onClick={(e) => { e.stopPropagation(); setExpanded(!expanded); }}
+                className="text-gray-400 hover:text-gray-600 p-1" title={expanded ? 'Collapse' : 'Expand details'}>
+                <Icon name={expanded ? 'chevron-up' : 'chevron-down'} size={16} />
+              </button>
+              <div className="bg-indigo-600 text-white px-3 py-1 rounded-full text-sm font-bold">#{idx + 1}</div>
+            </div>
           </div>
 
-          <div className={`grid gap-3 mb-3 p-3 bg-gray-50 rounded-md ${hasCustomFormula ? 'grid-cols-2 md:grid-cols-4 lg:grid-cols-7' : 'grid-cols-2 md:grid-cols-3 lg:grid-cols-6'}`}>
-            {hasCustomFormula && (
-              <div className="bg-indigo-100 rounded p-2 -m-1">
-                <MetricDisplay label="Custom Score" value={row.custom_score} highlight />
-              </div>
-            )}
-            <MetricDisplay label="Priority Score" value={row[sortMetric]} />
-            <MetricDisplay label="MHCFlurry Binding Aff" value={row['mhcflurry_2.1.1.aff']} />
-            <MetricDisplay label="MHCFlurry Pres Score" value={row['mhcflurry_2.1.1.pres_score']} />
-            <MetricDisplay label="CCF" value={row.ccf} />
-            <MetricDisplay label="VAF" value={row.vaf} />
-            <MetricDisplay label="Log2(TPM)" value={row.tpm} transform={v => { const num = parseFloat(v); return (!isNaN(num) && num > 0) ? Math.log2(num) : null; }} />
+          <div className="mb-3 p-3 bg-gray-50 rounded-md">
+            <table className="w-full"><tbody>
+              {hasCustomFormula && <MetricDisplay label="Custom Score" value={row.custom_score} highlight />}
+              <MetricDisplay label="Priority Score" value={row[sortMetric]} />
+              <MetricDisplay label="MHCFlurry Binding Aff" value={row['mhcflurry_2.1.1.aff']} />
+              <MetricDisplay label="MHCFlurry Pres Score" value={row['mhcflurry_2.1.1.pres_score']} />
+              <MetricDisplay label="CCF" value={row.ccf} />
+              <MetricDisplay label="VAF" value={row.vaf} />
+              <MetricDisplay label="Log2(TPM)" value={row.tpm} transform={v => { const num = parseFloat(v); return (!isNaN(num) && num > 0) ? Math.log2(num) : null; }} />
+              {sourceFields.length > 0 && (
+                <tr><td colSpan={2} className="pt-1 pb-0.5">
+                  <div className="border-t border-gray-200 mt-1 mb-0.5"></div>
+                </td></tr>
+              )}
+              {sourceFields.map(f => (
+                <MetricDisplay key={f.key} label={f.label} value={row[f.key]} isText />
+              ))}
+            </tbody></table>
           </div>
 
           {(isSNV || isIndel || isFusion || isCTA) && (
@@ -3469,6 +3846,8 @@
             </div>
           )}
 
+          {expanded && <ExpandedCardContent row={row} />}
+
           <div>
             <label className="block mb-1 text-xs font-medium text-gray-700">Comments</label>
             <textarea
@@ -3481,18 +3860,19 @@
       );
     };
 
-    // Metric Display Component
-    const MetricDisplay = ({ label, value, highlight, transform }) => {
+    // Metric Display Component — renders a table row (key left, value right)
+    const MetricDisplay = ({ label, value, highlight, transform, isText }) => {
       const displayValue = (v) => {
         if (v === null || v === undefined || v === '' || v === 'NA') return 'N/A';
+        if (isText) return String(v);
         const transformedValue = transform ? transform(v) : parseFloat(v);
         return (transformedValue === null || isNaN(transformedValue)) ? 'N/A' : transformedValue.toFixed(3);
       };
       return (
-        <div>
-          <div className={`text-xs mb-0.5 uppercase tracking-wide ${highlight ? 'text-indigo-700 font-semibold' : 'text-gray-500'}`}>{label}</div>
-          <div className={`text-sm font-semibold ${highlight ? 'text-indigo-900' : 'text-gray-800'}`}>{displayValue(value)}</div>
-        </div>
+        <tr className={highlight ? 'bg-indigo-50' : ''}>
+          <td className={`pr-3 py-0.5 text-xs uppercase tracking-wide whitespace-nowrap ${highlight ? 'text-indigo-700 font-semibold' : 'text-gray-500'}`}>{label}</td>
+          <td className={`py-0.5 text-sm font-semibold ${highlight ? 'text-indigo-900' : 'text-gray-800'}`}>{displayValue(value)}</td>
+        </tr>
       );
     };
 
