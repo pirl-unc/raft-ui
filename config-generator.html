@@ -2403,6 +2403,7 @@ params.lens$lenstools_make_lens_report$lens_version = 'lens-v1.9-dev'
                 // Add placeholder for reference parameters
                 if (param.isReference) {
                     input.placeholder = 'Path to reference file';
+                    input.dataset.isReference = 'true';
                     input.dataset.originalValue = param.value;
                     
                     // Create fixed warning icon placeholder
@@ -3333,6 +3334,20 @@ params.lens$lenstools_make_lens_report$lens_version = 'lens-v1.9-dev'
             return items.slice(0, -1).join(', ') + ', and ' + items[items.length - 1];
         }
 
+        function normalizeReferencePath(value) {
+            const trimmed = (value || '').trim();
+            if (!trimmed) {
+                return '';
+            }
+            if (trimmed.startsWith('${params.ref_dir}/') ||
+                trimmed.startsWith('/') ||
+                trimmed.startsWith('s3://') ||
+                trimmed.startsWith('gs://')) {
+                return trimmed;
+            }
+            return `${'${params.ref_dir}/'}${trimmed.replace(/^\.?\//, '')}`;
+        }
+
         function generateConfigOutput() {
             const config = [];
             
@@ -3350,7 +3365,10 @@ params.lens$lenstools_make_lens_report$lens_version = 'lens-v1.9-dev'
             // Collect workflow parameters
             document.querySelectorAll('.workflow-param').forEach(input => {
                 const parameter = input.dataset.parameter;
-                const value = input.value;
+                let value = input.value;
+                if (input.dataset.isReference === 'true') {
+                    value = normalizeReferencePath(value);
+                }
                 workflowParamValues[parameter] = value;
             });
             
