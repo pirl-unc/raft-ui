@@ -3365,6 +3365,12 @@ params.lens$lenstools_make_lens_report$lens_version = 'lens-v1.9-dev'
             return normalizeSingleReferencePath(trimmed);
         }
 
+        function escapeConfigString(value) {
+            return String(value || '')
+                .replace(/\\/g, '\\\\')
+                .replace(/"/g, '\\"');
+        }
+
         function generateConfigOutput() {
             const config = [];
             
@@ -3435,14 +3441,14 @@ params.lens$lenstools_make_lens_report$lens_version = 'lens-v1.9-dev'
             config.push('// Tool Selections');
             Object.keys(toolGroups).forEach(parameter => {
                 const group = toolGroups[parameter];
-                config.push(`${parameter} = "${group.tools.join(',')}"`);
+                config.push(`${parameter} = "${escapeConfigString(group.tools.join(','))}"`);
             });
             
             config.push('');
             config.push('// Workflow Parameters');
             Object.keys(workflowParamValues).sort().forEach(parameter => {
                 const value = workflowParamValues[parameter];
-                config.push(`${parameter} = "${value}"`);
+                config.push(`${parameter} = "${escapeConfigString(value)}"`);
             });
 
             config.push('');
@@ -3457,7 +3463,7 @@ params.lens$lenstools_make_lens_report$lens_version = 'lens-v1.9-dev'
                     .join(',');
                 
                 const paramString = paramPairs ? `[${paramPairs}]` : '[]';
-                config.push(`${group.parameterField} = "${paramString}"`);
+                config.push(`${group.parameterField} = "${escapeConfigString(paramString)}"`);
             });
 
             config.push('');
