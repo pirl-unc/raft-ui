@@ -51,9 +51,31 @@
       return {
         preload: params.get('preload') || '',
         preloadQc: params.get('preload_qc') || '',
-        projectId: params.get('project_id') || ''
+        projectId: params.get('project_id') || '',
+        demo: params.get('demo') || ''
       };
     };
+
+    const DEMO_FILES = [
+      {
+        name: 'DemoStudy_2024-DEMO001-ad-1001+ar-2001+nd-3001.lens-v1.8.report.tsv',
+        content: [
+          'allele\tpeptide\tantigen_source\tgene_name\tpriority_score_maximum\tpriority_score_mhcflurry\tmhcflurry_2.1.1.aff\tccf\tvaf\ttpm',
+          'HLA-A*02:01\tSLYNTVATL\tSNV\tTP53\t0.92\t0.88\t45.2\t0.81\t0.42\t12.4',
+          'HLA-B*07:02\tKLGGALQAK\tFusion\tEML4\t0.78\t0.74\t82.9\t0.63\t0.35\t8.1',
+          'HLA-C*07:02\tGILGFVFTL\tSplice\tSF3B1\t0.65\t0.61\t155.3\t0.54\t0.22\t6.7',
+        ].join('\n')
+      },
+      {
+        name: 'DemoStudy_2024-DEMO002-ad-1003+ar-2003+nd-3003.lens-v1.8.report.tsv',
+        content: [
+          'allele\tpeptide\tantigen_source\tgene_name\tpriority_score_maximum\tpriority_score_mhcflurry\tmhcflurry_2.1.1.aff\tccf\tvaf\ttpm',
+          'HLA-A*24:02\tLLFGYPVYV\tERV\tMAGEA3\t0.84\t0.79\t66.1\t0.72\t0.39\t15.8',
+          'HLA-B*08:01\tNLVPMVATV\tVirus\tEBV-BZLF1\t0.73\t0.69\t94.4\t0.58\t0.27\t11.2',
+          'HLA-C*04:01\tYLQPRTFLL\tCTA\tCTAG1B\t0.68\t0.64\t121.0\t0.49\t0.19\t9.3',
+        ].join('\n')
+      }
+    ];
 
     // Priority metrics
     const priorityMetrics = [
@@ -589,6 +611,38 @@
       // Preload files from server
       useEffect(() => {
         const urlParams = getUrlParams();
+        if (urlParams.demo === '1' || urlParams.demo.toLowerCase() === 'true') {
+          const loadDemoFiles = async () => {
+            setIsPreloading(true);
+            try {
+              let parsed = {};
+              DEMO_FILES.forEach(file => {
+                parsed = parseFileContent(file.name, file.content, parsed, null);
+              });
+
+              setPatients({ ...parsed });
+              const firstId = Object.keys(parsed).sort()[0];
+              if (firstId) {
+                setSelectedPatient(firstId);
+                const patient = parsed[firstId];
+                if (patient.isMultiGroup && patient.groups.length > 0) {
+                  setSelectedGroup(patient.groups[0]);
+                  const groupData = patient.groupData[patient.groups[0]];
+                  setSelectedAlleles(new Set(groupData.alleles));
+                  setSelectedAntigenSources(new Set(groupData.antigenSources));
+                } else {
+                  setSelectedAlleles(new Set(patient.alleles));
+                  setSelectedAntigenSources(new Set(patient.antigenSources));
+                }
+              }
+            } catch (e) {
+              setPreloadError(`Demo load failed: ${e.message}`);
+            }
+            setIsPreloading(false);
+          };
+          loadDemoFiles();
+          return;
+        }
         if (!urlParams.preload) return;
 
         const loadFiles = async () => {
