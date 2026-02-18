@@ -3371,6 +3371,12 @@ params.lens$lenstools_make_lens_report$lens_version = 'lens-v1.9-dev'
                 .replace(/"/g, '\\"');
         }
 
+        function escapeSingleQuotedValue(value) {
+            return String(value || '')
+                .replace(/\\/g, '\\\\')
+                .replace(/'/g, "\\'");
+        }
+
         function generateConfigOutput() {
             const config = [];
             
@@ -3459,8 +3465,8 @@ params.lens$lenstools_make_lens_report$lens_version = 'lens-v1.9-dev'
                 
                 const paramPairs = group.params
                     .filter(p => p.params)
-                    .map(p => `${p.tool}:${p.params}`)
-                    .join(',');
+                    .map(p => `'${escapeSingleQuotedValue(p.tool)}': '${escapeSingleQuotedValue(p.params)}'`)
+                    .join(', ');
                 
                 const paramString = paramPairs ? `[${paramPairs}]` : '[]';
                 config.push(`${group.parameterField} = "${escapeConfigString(paramString)}"`);
