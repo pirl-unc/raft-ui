@@ -3335,17 +3335,34 @@ params.lens$lenstools_make_lens_report$lens_version = 'lens-v1.9-dev'
         }
 
         function normalizeReferencePath(value) {
+            const normalizeSingleReferencePath = (pathValue) => {
+                const trimmedPath = (pathValue || '').trim();
+                if (!trimmedPath) {
+                    return '';
+                }
+                if (trimmedPath.startsWith('${params.ref_dir}/') ||
+                    trimmedPath.startsWith('/') ||
+                    trimmedPath.startsWith('s3://') ||
+                    trimmedPath.startsWith('gs://')) {
+                    return trimmedPath;
+                }
+                return `${'${params.ref_dir}/'}${trimmedPath.replace(/^\.?\//, '')}`;
+            };
+
             const trimmed = (value || '').trim();
             if (!trimmed) {
                 return '';
             }
-            if (trimmed.startsWith('${params.ref_dir}/') ||
-                trimmed.startsWith('/') ||
-                trimmed.startsWith('s3://') ||
-                trimmed.startsWith('gs://')) {
-                return trimmed;
+
+            // Mapping-like references should prepend ref_dir to each mapped value
+            // instead of the whole literal (e.g., ['key': 'path']).
+            if (trimmed.startsWith('[') && trimmed.endsWith(']') && trimmed.includes(':')) {
+                return trimmed.replace(/(:\s*["'])([^"']+)(["'])/g, (match, prefix, rawPath, suffix) => {
+                    return `${prefix}${normalizeSingleReferencePath(rawPath)}${suffix}`;
+                });
             }
-            return `${'${params.ref_dir}/'}${trimmed.replace(/^\.?\//, '')}`;
+
+            return normalizeSingleReferencePath(trimmed);
         }
 
         function generateConfigOutput() {
