@@ -122,6 +122,10 @@
         Sequencing_Method: 'WES', Group: '', MHC_Alleles: ''
       });
       const [samples, setSamples] = useState([]);
+      const [fastqPrefixes, setFastqPrefixes] = useState([]);
+      const [showPrefixDropdown, setShowPrefixDropdown] = useState(false);
+      const [prefixFilter, setPrefixFilter] = useState('');
+      const [fastqValidation, setFastqValidation] = useState({});
 
       const workflows = [
         { value: 'lens', label: 'LENS (Tumor Antigens)', description: 'Complete tumor antigen prediction from SNVs, InDels, fusions, splice variants, ERVs, viruses, and CTAs',
@@ -173,6 +177,65 @@
         });
         return [headers.join('\t'), ...rows.map(r => r.join('\t'))].join('\n');
       }, [samples]);
+
+      useEffect(() => {
+        const fetchPrefixes = async () => {
+          try {
+            const response = await fetch(`${API_BASE}/api/fastqs`);
+            if (response.ok) {
+              const data = await response.json();
+              setFastqPrefixes(data.prefixes || []);
+            }
+          } catch (error) {
+            console.warn('Failed to fetch FASTQ prefixes:', error);
+          }
+        };
+        fetchPrefixes();
+      }, []);
+
+      useEffect(() => {
+        const fetchPrefixesForDataset = async () => {
+          try {
+            if (!currentSample.Dataset) {
+              const response = await fetch(`${API_BASE}/api/fastqs`);
+              if (response.ok) {
+                const data = await response.json();
+                setFastqPrefixes(data.prefixes || []);
+              }
+              return;
+            }
+            const response = await fetch(`${API_BASE}/api/fastqs?datasets=${encodeURIComponent(currentSample.Dataset)}`);
+            if (response.ok) {
+              const data = await response.json();
+              setFastqPrefixes(data.prefixes || []);
+            }
+          } catch (error) {
+            console.warn('Failed to fetch dataset FASTQ prefixes:', error);
+          }
+        };
+        fetchPrefixesForDataset();
+      }, [currentSample.Dataset]);
+
+      useEffect(() => {
+        if (!currentSample.File_Prefix || !currentSample.Dataset) {
+          setFastqValidation({});
+          return;
+        }
+        const timer = setTimeout(async () => {
+          try {
+            const response = await fetch(
+              `${API_BASE}/api/validate-fastq?prefix=${encodeURIComponent(currentSample.File_Prefix)}&dataset=${encodeURIComponent(currentSample.Dataset)}`
+            );
+            if (response.ok) {
+              const data = await response.json();
+              setFastqValidation(data);
+            }
+          } catch (error) {
+            console.warn('Failed to validate FASTQ prefix:', error);
+          }
+        }, 400);
+        return () => clearTimeout(timer);
+      }, [currentSample.File_Prefix, currentSample.Dataset]);
 
       useEffect(() => {
         if (samples.length === 0) return;
@@ -354,6 +417,28 @@
           Group: '',
           MHC_Alleles: ''
         });
+        setShowPrefixDropdown(false);
+        setPrefixFilter('');
+        setFastqValidation({});
+      };
+
+      const handlePrefixSelect = (prefixObj) => {
+        setCurrentSample(prev => ({
+          ...prev,
+          File_Prefix: prefixObj.prefix,
+          Dataset: prefixObj.dataset
+        }));
+        setShowPrefixDropdown(false);
+        setPrefixFilter('');
+      };
+
+      const getFilteredPrefixes = () => {
+        const filter = (prefixFilter || currentSample.File_Prefix || '').toLowerCase();
+        if (!filter) return fastqPrefixes.slice(0, 20);
+        return fastqPrefixes.filter(p =>
+          p.prefix.toLowerCase().includes(filter) ||
+          p.display.toLowerCase().includes(filter)
+        ).slice(0, 20);
       };
 
       const editSample = (sample) => {
@@ -522,17 +607,58 @@
                     className="w-full px-2 py-1.5 text-sm border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500"
                   />
                 </div>
-                <div>
+                <div className="relative">
                   <label className="block text-xs font-medium text-gray-700 mb-1">
                     File Prefix *
                     <InfoTooltip text={`FASTQ base name without read number or extension.\n\nExample: For files named sample_1.fastq.gz and sample_2.fastq.gz, use 'sample'\n\nEnsure FASTQs are available in your RAFT fastqs/ directory.`} />
                   </label>
-                  <input type="text" value={currentSample.File_Prefix} onChange={(e) => setCurrentSample({ ...currentSample, File_Prefix: e.target.value })}
-                    placeholder="e.g., sample" className="w-full px-2 py-1.5 text-sm border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500" />
+                  <input
+                    type="text"
+                    value={currentSample.File_Prefix}
+                    onChange={(e) => {
+                      setCurrentSample({ ...currentSample, File_Prefix: e.target.value });
+                      setPrefixFilter(e.target.value);
+                      setShowPrefixDropdown(true);
+                    }}
+                    onFocus={() => setShowPrefixDropdown(true)}
+                    onBlur={() => setTimeout(() => setShowPrefixDropdown(false), 200)}
+                    placeholder="e.g., sample (type to search)"
+                    className="w-full px-2 py-1.5 text-sm border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500"
+                  />
+                  {showPrefixDropdown && fastqPrefixes.length > 0 && (
+                    <div className="absolute z-50 w-full mt-1 bg-white border border-gray-300 rounded-md shadow-lg max-h-48 overflow-y-auto">
+                      {getFilteredPrefixes().length > 0 ? (
+                        getFilteredPrefixes().map((prefix, idx) => (
+                          <div
+                            key={`${prefix.dataset}-${prefix.prefix}-${idx}`}
+                            className="px-3 py-2 text-sm hover:bg-indigo-50 cursor-pointer border-b border-gray-100 last:border-b-0"
+                            onMouseDown={(e) => {
+                              e.preventDefault();
+                              handlePrefixSelect(prefix);
+                            }}
+                          >
+                            <div className="font-medium text-gray-800">{prefix.prefix}</div>
+                            <div className="text-xs text-gray-500">Dataset: {prefix.dataset}</div>
+                          </div>
+                        ))
+                      ) : (
+                        <div className="px-3 py-2 text-sm text-gray-500">No matching FASTQs found</div>
+                      )}
+                    </div>
+                  )}
                   {filePrefixWarning && (
                     <div className="bg-yellow-50 border border-yellow-200 rounded-md p-2 mt-1 flex items-start gap-2">
                       <AlertCircle className="text-yellow-600 flex-shrink-0 mt-0.5" size={14} />
                       <div className="text-xs text-yellow-900">{filePrefixWarning}</div>
+                    </div>
+                  )}
+                  {currentSample.File_Prefix && currentSample.Dataset && fastqValidation.exists === false && (
+                    <div className="bg-orange-50 border border-orange-200 rounded-md p-2 mt-1 flex items-start gap-2">
+                      <AlertCircle className="text-orange-600 flex-shrink-0 mt-0.5" size={14} />
+                      <div className="text-xs text-orange-900">
+                        FASTQ files not found for "{currentSample.File_Prefix}" in dataset "{currentSample.Dataset}".
+                        {fastqValidation.error && <span className="block mt-1">{fastqValidation.error}</span>}
+                      </div>
                     </div>
                   )}
                 </div>
