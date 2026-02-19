@@ -56,9 +56,45 @@
       };
     };
 
+    const DEMO_MANIFEST = {
+      has_multi_group: true,
+      all_groups: ['baseline', 'on_treatment', 'default'],
+      run_to_groups: {
+        'ad-1001b': ['baseline'],
+        'ar-2001b': ['baseline'],
+        'nd-3001b': ['baseline'],
+        'ad-1001t': ['on_treatment'],
+        'ar-2001t': ['on_treatment'],
+        'nd-3001t': ['on_treatment'],
+        'ad-1002b': ['baseline'],
+        'ar-2002b': ['baseline'],
+        'nd-3002b': ['baseline'],
+        'ad-1002r': ['on_treatment'],
+        'ar-2002r': ['on_treatment'],
+        'nd-3002r': ['on_treatment'],
+        'ad-1003': ['default'],
+        'ar-2003': ['default'],
+        'nd-3003': ['default']
+      },
+      patients: {
+        DEMO001: {
+          groups: ['baseline', 'on_treatment'],
+          group_labels: { baseline: 'Baseline', on_treatment: 'On Treatment' }
+        },
+        DEMO002: {
+          groups: ['baseline', 'on_treatment'],
+          group_labels: { baseline: 'Baseline', on_treatment: 'On Treatment' }
+        },
+        DEMO003: {
+          groups: ['default'],
+          group_labels: { default: 'Default' }
+        }
+      }
+    };
+
     const DEMO_FILES = [
       {
-        name: 'DemoStudy_2024-DEMO001-ad-1001+ar-2001+nd-3001.lens-v1.8.report.tsv',
+        name: 'DemoStudy_2024-DEMO001-ad-1001b+ar-2001b+nd-3001b.lens-v1.8.report.tsv',
         content: [
           'allele\tpeptide\tantigen_source\tgene_name\tpriority_score_maximum\tpriority_score_mhcflurry\tmhcflurry_2.1.1.aff\tccf\tvaf\ttpm',
           'HLA-A*02:01\tSLYNTVATL\tSNV\tTP53\t0.92\t0.88\t45.2\t0.81\t0.42\t12.4',
@@ -67,12 +103,39 @@
         ].join('\n')
       },
       {
-        name: 'DemoStudy_2024-DEMO002-ad-1003+ar-2003+nd-3003.lens-v1.8.report.tsv',
+        name: 'DemoStudy_2024-DEMO001-ad-1001t+ar-2001t+nd-3001t.lens-v1.8.report.tsv',
+        content: [
+          'allele\tpeptide\tantigen_source\tgene_name\tpriority_score_maximum\tpriority_score_mhcflurry\tmhcflurry_2.1.1.aff\tccf\tvaf\ttpm',
+          'HLA-A*02:01\tALYNTVSTL\tSNV\tTP53\t0.87\t0.82\t57.8\t0.74\t0.37\t10.1',
+          'HLA-B*07:02\tELAGIGILTV\tSNV\tKRAS\t0.76\t0.71\t90.6\t0.58\t0.31\t7.4',
+          'HLA-C*07:02\tTLMNQYTSV\tIndel\tPIK3CA\t0.61\t0.58\t168.7\t0.47\t0.18\t5.9',
+        ].join('\n')
+      },
+      {
+        name: 'DemoStudy_2024-DEMO002-ad-1002b+ar-2002b+nd-3002b.lens-v1.8.report.tsv',
         content: [
           'allele\tpeptide\tantigen_source\tgene_name\tpriority_score_maximum\tpriority_score_mhcflurry\tmhcflurry_2.1.1.aff\tccf\tvaf\ttpm',
           'HLA-A*24:02\tLLFGYPVYV\tERV\tMAGEA3\t0.84\t0.79\t66.1\t0.72\t0.39\t15.8',
           'HLA-B*08:01\tNLVPMVATV\tVirus\tEBV-BZLF1\t0.73\t0.69\t94.4\t0.58\t0.27\t11.2',
           'HLA-C*04:01\tYLQPRTFLL\tCTA\tCTAG1B\t0.68\t0.64\t121.0\t0.49\t0.19\t9.3',
+        ].join('\n')
+      },
+      {
+        name: 'DemoStudy_2024-DEMO002-ad-1002r+ar-2002r+nd-3002r.lens-v1.8.report.tsv',
+        content: [
+          'allele\tpeptide\tantigen_source\tgene_name\tpriority_score_maximum\tpriority_score_mhcflurry\tmhcflurry_2.1.1.aff\tccf\tvaf\ttpm',
+          'HLA-A*24:02\tGLFGYPVYV\tERV\tMAGEA3\t0.80\t0.76\t74.6\t0.67\t0.33\t13.7',
+          'HLA-B*08:01\tSLYRKQVTL\tSNV\tBRAF\t0.71\t0.66\t102.5\t0.52\t0.24\t10.0',
+          'HLA-C*04:01\tFTSDYYQLY\tFusion\tALK\t0.63\t0.59\t139.2\t0.44\t0.17\t8.6',
+        ].join('\n')
+      },
+      {
+        name: 'DemoStudy_2024-DEMO003-ad-1003+ar-2003+nd-3003.lens-v1.8.report.tsv',
+        content: [
+          'allele\tpeptide\tantigen_source\tgene_name\tpriority_score_maximum\tpriority_score_mhcflurry\tmhcflurry_2.1.1.aff\tccf\tvaf\ttpm',
+          'HLA-A*03:01\tKLVVGAVGV\tSNV\tIDH1\t0.82\t0.77\t71.3\t0.69\t0.36\t14.9',
+          'HLA-B*35:01\tQYIKWPWYI\tIndel\tPTEN\t0.70\t0.65\t109.8\t0.55\t0.25\t9.7',
+          'HLA-C*06:02\tYVLDHLIVV\tSplice\tRB1\t0.62\t0.57\t146.4\t0.46\t0.16\t7.8',
         ].join('\n')
       }
     ];
@@ -617,7 +680,7 @@
             try {
               let parsed = {};
               DEMO_FILES.forEach(file => {
-                parsed = parseFileContent(file.name, file.content, parsed, null);
+                parsed = parseFileContent(file.name, file.content, parsed, DEMO_MANIFEST);
               });
 
               setPatients({ ...parsed });
