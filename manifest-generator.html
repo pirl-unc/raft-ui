@@ -178,6 +178,50 @@
         return [headers.join('\t'), ...rows.map(r => r.join('\t'))].join('\n');
       }, [samples]);
 
+      const parseTSVToSamples = useCallback((text) => {
+        const lines = (text || '').split('\n').filter(l => l.trim());
+        if (lines.length < 2) return [];
+        const headers = lines[0].split('\t');
+        return lines.slice(1).map((line, idx) => {
+          const values = line.split('\t');
+          const sample = { id: idx + 1 };
+          headers.forEach((header, i) => {
+            if (header === 'Normal') return;
+            if (header === 'Alleles') {
+              sample.MHC_Alleles = values[i] || '';
+            } else {
+              sample[header] = values[i] || '';
+            }
+          });
+          if (!sample.MHC_Alleles) sample.MHC_Alleles = '';
+          const sampleType = getSampleType(sample.Run_Name);
+          sample.Sequencing_Method = getSequencingMethodForType(sampleType ? sampleType.type : '');
+          return sample;
+        });
+      }, []);
+
+      useEffect(() => {
+        const loadPreloadedManifest = async () => {
+          try {
+            const response = await fetch(`${API_BASE}/api/manifest`);
+            if (!response.ok) return;
+            const data = await response.json();
+            if (!data.manifest) return;
+            const preloaded = parseTSVToSamples(data.manifest);
+            if (preloaded.length === 0) return;
+            setSamples(preloaded);
+            setCurrentSample(prev => ({
+              ...prev,
+              Dataset: preloaded[0].Dataset || prev.Dataset,
+              Patient_Name: preloaded[0].Patient_Name || prev.Patient_Name
+            }));
+          } catch (error) {
+            console.warn('Failed to load preloaded manifest:', error);
+          }
+        };
+        loadPreloadedManifest();
+      }, [parseTSVToSamples]);
+
       useEffect(() => {
         const fetchPrefixes = async () => {
           try {
@@ -192,29 +236,6 @@
         };
         fetchPrefixes();
       }, []);
-
-      useEffect(() => {
-        const fetchPrefixesForDataset = async () => {
-          try {
-            if (!currentSample.Dataset) {
-              const response = await fetch(`${API_BASE}/api/fastqs`);
-              if (response.ok) {
-                const data = await response.json();
-                setFastqPrefixes(data.prefixes || []);
-              }
-              return;
-            }
-            const response = await fetch(`${API_BASE}/api/fastqs?datasets=${encodeURIComponent(currentSample.Dataset)}`);
-            if (response.ok) {
-              const data = await response.json();
-              setFastqPrefixes(data.prefixes || []);
-            }
-          } catch (error) {
-            console.warn('Failed to fetch dataset FASTQ prefixes:', error);
-          }
-        };
-        fetchPrefixesForDataset();
-      }, [currentSample.Dataset]);
 
       useEffect(() => {
         if (!currentSample.File_Prefix || !currentSample.Dataset) {
@@ -433,9 +454,13 @@
       };
 
       const getFilteredPrefixes = () => {
+        const datasetFilter = (currentSample.Dataset || '').toLowerCase().trim();
         const filter = (prefixFilter || currentSample.File_Prefix || '').toLowerCase();
-        if (!filter) return fastqPrefixes.slice(0, 20);
-        return fastqPrefixes.filter(p =>
+        const filteredByDataset = datasetFilter
+          ? fastqPrefixes.filter(p => p.dataset.toLowerCase().includes(datasetFilter))
+          : fastqPrefixes;
+        if (!filter) return filteredByDataset.slice(0, 20);
+        return filteredByDataset.filter(p =>
           p.prefix.toLowerCase().includes(filter) ||
           p.display.toLowerCase().includes(filter)
         ).slice(0, 20);
@@ -476,18 +501,7 @@
         const reader = new FileReader();
         reader.onload = (event) => {
           const text = event.target.result;
-          const lines = text.split('\n').filter(l => l.trim());
-          if (lines.length < 2) return;
-          const headers = lines[0].split('\t');
-          const newSamples = lines.slice(1).map((line, idx) => {
-            const values = line.split('\t');
-            const sample = { id: idx + 1 };
-            headers.forEach((header, i) => { if (header !== 'Normal') sample[header] = values[i] || ''; });
-            if (!sample.MHC_Alleles) sample.MHC_Alleles = '';
-            const sampleType = getSampleType(sample.Run_Name);
-            sample.Sequencing_Method = getSequencingMethodForType(sampleType ? sampleType.type : '');
-            return sample;
-          });
+          const newSamples = parseTSVToSamples(text);
           setSamples(newSamples);
         };
         reader.readAsText(file);
