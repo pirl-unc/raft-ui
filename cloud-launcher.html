@@ -42,7 +42,6 @@
     const { useState, useEffect, useCallback, useRef } = React;
 
     // ─── Provider Configuration ────────────────────────────────────────────────
-    // Replace these before publishing to GitHub Pages.
     const GOOGLE_OAUTH_CLIENT_ID = '357760984037-t294ma4k7imn5jo0ktomrek3h91fs9ql.apps.googleusercontent.com';
     const RAFT_RUNNER_IMAGE = 'spvensko/raft-runner:latest';
     // ──────────────────────────────────────────────────────────────────────────
@@ -237,14 +236,24 @@ gcloud storage buckets update gs://${extractBucketName(cloudConfig.bucket) || 'Y
 
 # Grant your Google account the necessary IAM roles
 gcloud projects add-iam-policy-binding ${cloudConfig.projectId || 'YOUR_PROJECT_ID'} \\
-  --member="user:${cloudConfig._userEmail || 'YOUR_EMAIL'}" --role="roles/batch.jobsEditor"
+  --member="user:${cloudConfig.userEmail || 'YOUR_EMAIL'}" --role="roles/batch.jobsEditor"
 gcloud projects add-iam-policy-binding ${cloudConfig.projectId || 'YOUR_PROJECT_ID'} \\
-  --member="user:${cloudConfig._userEmail || 'YOUR_EMAIL'}" --role="roles/storage.objectAdmin"`;
+  --member="user:${cloudConfig.userEmail || 'YOUR_EMAIL'}" --role="roles/storage.objectAdmin"`;
 
       return (
         <div>
           <h2 className="text-lg font-semibold text-gray-900 mb-1">Cloud Setup</h2>
-          <p className="text-sm text-gray-500 mb-6">Configure your GCP project and storage for RAFT jobs.</p>
+          <p className="text-sm text-gray-500 mb-4">Configure your GCP project and storage for RAFT jobs.</p>
+
+          <div className="mb-6 rounded-lg border border-green-200 bg-green-50 p-4 text-sm text-green-800">
+            <p className="font-semibold mb-1">Your data stays in your cloud</p>
+            <ul className="space-y-0.5 text-green-700">
+              <li>• RAFT runs entirely within your GCP project using your own credentials</li>
+              <li>• Compute costs are billed directly to your account</li>
+              <li>• Your data never leaves your GCS bucket</li>
+              <li>• No credentials, tokens, or results are stored by this tool</li>
+            </ul>
+          </div>
 
           <Field label="GCP Project ID" required error={errors.projectId}
             hint="Your Google Cloud project identifier (e.g. my-project-123)">
@@ -252,6 +261,16 @@ gcloud projects add-iam-policy-binding ${cloudConfig.projectId || 'YOUR_PROJECT_
               placeholder="my-gcp-project"
               value={cloudConfig.projectId}
               onChange={e => onChange({ ...cloudConfig, projectId: e.target.value })}
+            />
+          </Field>
+
+          <Field label="Your Google Account Email" required error={errors.userEmail}
+            hint="Used in setup commands and for workflow-related notifications">
+            <TextInput
+              placeholder="you@example.com"
+              type="email"
+              value={cloudConfig.userEmail}
+              onChange={e => onChange({ ...cloudConfig, userEmail: e.target.value })}
             />
           </Field>
 
@@ -778,6 +797,7 @@ gcloud projects add-iam-policy-binding ${cloudConfig.projectId || 'YOUR_PROJECT_
         region: 'us-central1',
         runnerSA: '',
         runnerImage: RAFT_RUNNER_IMAGE === 'YOUR_RUNNER_IMAGE_URI' ? '' : RAFT_RUNNER_IMAGE,
+        userEmail: '',
       });
       const [samples, setSamples] = useState([]);
       const [settings, setSettings] = useState({
@@ -812,7 +832,9 @@ gcloud projects add-iam-policy-binding ${cloudConfig.projectId || 'YOUR_PROJECT_
                     headers: { Authorization: `Bearer ${resp.access_token}` },
                   });
                   const info = await userResp.json();
-                  setUserEmail(info.email || '');
+                  const email = info.email || '';
+                  setUserEmail(email);
+                  if (email) setCloudConfig(c => ({ ...c, userEmail: c.userEmail || email }));
                 } catch (_) {}
               }
             },
@@ -845,6 +867,7 @@ gcloud projects add-iam-policy-binding ${cloudConfig.projectId || 'YOUR_PROJECT_
       const validateCloud = () => {
         const errs = {};
         if (!cloudConfig.projectId.trim()) errs.projectId = 'GCP Project ID is required';
+        if (!cloudConfig.userEmail.trim()) errs.userEmail = 'Email is required';
         if (!cloudConfig.bucket.trim()) errs.bucket = 'GCS bucket is required';
         if (!cloudConfig.runnerImage.trim()) errs.runnerImage = 'Runner Docker image URI is required';
         setCloudErrors(errs);
@@ -980,7 +1003,7 @@ gcloud projects add-iam-policy-binding ${cloudConfig.projectId || 'YOUR_PROJECT_
             <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-6 mb-6">
               {step === 1 && (
                 <CloudSetupStep
-                  cloudConfig={{ ...cloudConfig, _userEmail: userEmail }}
+                  cloudConfig={cloudConfig}
                   onChange={setCloudConfig}
                   errors={cloudErrors}
                 />
