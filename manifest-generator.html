@@ -65,7 +65,8 @@
       return {
         projectId: params.get('project_id') || '',
         workflow: params.get('workflow') || '',
-        version: params.get('version') || ''
+        version: params.get('version') || '',
+        dataset: params.get('dataset') || ''
       };
     };
 
@@ -118,11 +119,12 @@
       const [isSaving, setIsSaving] = useState(false);
       const [saveStatus, setSaveStatus] = useState('');
       const [currentSample, setCurrentSample] = useState({
-        Patient_Name: '', Run_Name: '', Dataset: '', File_Prefix: '',
+        Patient_Name: '', Run_Name: '', Dataset: sessionParams.dataset || '', File_Prefix: '',
         Sequencing_Method: 'WES', Group: '', MHC_Alleles: ''
       });
       const [samples, setSamples] = useState([]);
       const [fastqPrefixes, setFastqPrefixes] = useState([]);
+      const [availableDatasets, setAvailableDatasets] = useState([]);
       const [showPrefixDropdown, setShowPrefixDropdown] = useState(false);
       const [prefixFilter, setPrefixFilter] = useState('');
       const [fastqValidation, setFastqValidation] = useState({});
@@ -235,6 +237,27 @@
           }
         };
         fetchPrefixes();
+      }, []);
+
+      useEffect(() => {
+        const fetchDatasets = async () => {
+          try {
+            const response = await fetch(`${API_BASE}/api/available-datasets`);
+            if (response.ok) {
+              const data = await response.json();
+              const datasets = data.datasets || [];
+              setAvailableDatasets(datasets);
+              if (!currentSample.Dataset && sessionParams.dataset && datasets.includes(sessionParams.dataset)) {
+                setCurrentSample(prev => ({ ...prev, Dataset: sessionParams.dataset }));
+              } else if (!currentSample.Dataset && sessionParams.dataset) {
+                setCurrentSample(prev => ({ ...prev, Dataset: sessionParams.dataset }));
+              }
+            }
+          } catch (error) {
+            console.warn('Failed to fetch available datasets:', error);
+          }
+        };
+        fetchDatasets();
       }, []);
 
       useEffect(() => {
@@ -580,8 +603,18 @@
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
                 <div>
                   <label className="block text-xs font-medium text-gray-700 mb-1">Dataset * <InfoTooltip text="Dataset identifier for grouping samples" /></label>
-                  <input type="text" value={currentSample.Dataset} onChange={(e) => setCurrentSample({ ...currentSample, Dataset: e.target.value })}
+                  <input type="text" list="raft-dataset-options" value={currentSample.Dataset} onChange={(e) => setCurrentSample({ ...currentSample, Dataset: e.target.value })}
                     placeholder="e.g., MyDataset" className="w-full px-2 py-1.5 text-sm border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500" />
+                  <datalist id="raft-dataset-options">
+                    {availableDatasets.map((dataset) => (
+                      <option key={dataset} value={dataset} />
+                    ))}
+                  </datalist>
+                  {availableDatasets.length > 0 && (
+                    <div className="text-[11px] text-gray-500 mt-1">
+                      Available datasets: {availableDatasets.slice(0, 6).join(', ')}{availableDatasets.length > 6 ? ', ...' : ''}
+                    </div>
+                  )}
                 </div>
                 <div>
                   <label className="block text-xs font-medium text-gray-700 mb-1">
