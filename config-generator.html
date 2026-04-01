@@ -241,6 +241,156 @@
 
         // API configuration
         const API_BASE = window.location.origin;
+        const GITLAB_API_BASE = 'https://gitlab.com/api/v4';
+        const GITLAB_WORKFLOW_GROUPS = [
+            'reproducible-analyses-framework-and-tools/workflow-configs',
+            'reproducible-analyses-framework-and-tools/nextflow/workflows'
+        ];
+
+        function parseWorkflowRepoName(name) {
+            const parts = String(name || '').split('-');
+            if (parts.length < 3) return null;
+            const input = parts.pop();
+            const species = parts.pop();
+            const workflow = parts.join('-');
+            if (!workflow || !species || !input) return null;
+            return { workflow, species, input };
+        }
+
+        function labelFromWorkflowId(workflowId) {
+            const upper = String(workflowId || '').toUpperCase();
+            if (upper === 'LENS') return 'LENS - Landscape of Effective Neoantigens Software';
+            return String(workflowId || '').replace(/[-_]/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+        }
+
+        function normalizeVersionRef(workflowId, version) {
+            const value = String(version || '').trim();
+            if (!value) return '';
+            if (value.startsWith(`${workflowId}-`)) return value;
+            if (value.startsWith('v')) return `${workflowId}-${value}`;
+            return `${workflowId}-v${value}`;
+        }
+
+        async function fetchJson(url) {
+            const response = await fetch(url);
+            if (!response.ok) {
+                throw new Error(`${response.status}`);
+            }
+            return response.json();
+        }
+
+        async function fetchText(url) {
+            const response = await fetch(url);
+            if (!response.ok) {
+                throw new Error(`${response.status}`);
+            }
+            return response.text();
+        }
+
+        async function discoverWorkflowsFromGitLab() {
+            for (const groupPath of GITLAB_WORKFLOW_GROUPS) {
+                try {
+                    const groupId = encodeURIComponent(groupPath);
+                    const projects = await fetchJson(`${GITLAB_API_BASE}/groups/${groupId}/projects?include_subgroups=true&per_page=100`);
+                    const workflowsMap = new Map();
+                    projects.forEach(project => {
+                        const parsed = parseWorkflowRepoName(project.name);
+                        if (!parsed) return;
+                        const entry = workflowsMap.get(parsed.workflow) || {
+                            id: parsed.workflow,
+                            label: labelFromWorkflowId(parsed.workflow),
+                            default_version: '',
+                            versions: [],
+                            projects: []
+                        };
+                        entry.projects.push({
+                            id: project.id,
+                            path_with_namespace: project.path_with_namespace,
+                            name: project.name,
+                            species: parsed.species,
+                            input: parsed.input,
+                            default_branch: project.default_branch || ''
+                        });
+                        workflowsMap.set(parsed.workflow, entry);
+                    });
+                    const workflows = Array.from(workflowsMap.values()).sort((a, b) => a.id.localeCompare(b.id));
+                    return { workflows, _source: 'gitlab' };
+                } catch (_error) {
+                    // Try next candidate group.
+                }
+            }
+            throw new Error('Unable to load workflow index from GitLab');
+        }
+
+        async function ensureWorkflowVersions(workflowId, species, startingData) {
+            if (!workflowDefinitions || !workflowDefinitions.workflows) return [];
+            const workflow = workflowDefinitions.workflows.find(wf => wf.id === workflowId);
+            if (!workflow) return [];
+            const matchingProjects = (workflow.projects || []).filter(p => p.species === species && p.input === startingData);
+            if (matchingProjects.length === 0) return workflow.versions || [];
+
+            const versionsMap = new Map();
+            for (const project of matchingProjects) {
+                try {
+                    const branches = await fetchJson(`${GITLAB_API_BASE}/projects/${project.id}/repository/branches?per_page=100`);
+                    branches.forEach(branch => {
+                        const id = branch.name;
+                        if (!versionsMap.has(id)) {
+                            versionsMap.set(id, {
+                                id,
+                                species: [species],
+                                starting_data: [startingData],
+                                project_id: project.id,
+                                project_name: project.name,
+                                project_path_with_namespace: project.path_with_namespace
+                            });
+                        }
+                    });
+                } catch (_error) {
+                    // Keep going; another matching project may still work.
+                }
+            }
+
+            workflow.versions = Array.from(versionsMap.values()).sort((a, b) => a.id.localeCompare(b.id));
+            if (!workflow.default_version && workflow.versions.length > 0) {
+                workflow.default_version = workflow.versions[0].id;
+            }
+            return workflow.versions;
+        }
+
+        async function fetchWorkflowTemplateFromGitLab(workflowType, version, species, startingData) {
+            if (!workflowDefinitions || !workflowDefinitions.workflows) {
+                throw new Error('Workflow definitions not loaded');
+            }
+            const workflow = workflowDefinitions.workflows.find(wf => wf.id === workflowType);
+            if (!workflow) throw new Error(`Unknown workflow ${workflowType}`);
+            const versionDef = (workflow.versions || []).find(ver => ver.id === version);
+            let projectId = versionDef && versionDef.project_id;
+            if (!projectId) {
+                const project = (workflow.projects || []).find(p => p.species === species && p.input === startingData);
+                if (!project) throw new Error(`No GitLab workflow repo found for ${workflowType}/${species}/${startingData}`);
+                projectId = project.id;
+            }
+
+            const ref = normalizeVersionRef(workflowType, version);
+            const candidates = [
+                `${workflowType}.${species}.${startingData}.workflow-ui.json`,
+                'workflow-ui.json'
+            ];
+            let uiMeta = {};
+            for (const candidate of candidates) {
+                try {
+                    uiMeta = JSON.parse(await fetchText(`${GITLAB_API_BASE}/projects/${projectId}/repository/files/${encodeURIComponent(candidate)}/raw?ref=${encodeURIComponent(ref)}`));
+                    break;
+                } catch (_error) {
+                    // try next candidate
+                }
+            }
+
+            const configPath = uiMeta.config || `${workflowType}.${species}.${startingData}.config`;
+            const configText = await fetchText(`${GITLAB_API_BASE}/projects/${projectId}/repository/files/${encodeURIComponent(configPath)}/raw?ref=${encodeURIComponent(ref)}`);
+            return { config: configText, ui: uiMeta.ui || {} };
+        }
 
         // State management
         const state = {
@@ -284,11 +434,29 @@
         }
 
         async function loadWorkflowDefinitions() {
-            const response = await fetch(`${API_BASE}/api/workflow-definitions`);
-            if (!response.ok) {
-                throw new Error(`Unable to load workflow index: ${response.status}`);
+            let payload = null;
+            try {
+                const response = await fetch(`${API_BASE}/api/workflow-definitions`);
+                if (response.ok) {
+                    payload = await response.json();
+                }
+            } catch (_error) {
+                // Fall through to direct GitLab lookup and then static bundled definitions.
             }
-            workflowDefinitions = await response.json();
+
+            if (!payload) {
+                try {
+                    payload = await discoverWorkflowsFromGitLab();
+                } catch (_error) {
+                    const response = await fetch('workflows/index.json');
+                    if (!response.ok) {
+                        throw new Error(`Unable to load workflow index: ${response.status}`);
+                    }
+                    payload = await response.json();
+                }
+            }
+
+            workflowDefinitions = payload;
 
             const workflowSelect = document.getElementById('workflowType');
             workflowSelect.innerHTML = '<option value="">Select workflow...</option>';
@@ -300,7 +468,7 @@
             });
         }
 
-        function populateVersionOptions(workflowId) {
+        async function populateVersionOptions(workflowId) {
             const versionSelect = document.getElementById('workflowVersion');
             versionSelect.innerHTML = '<option value="">Select version...</option>';
             if (!workflowDefinitions || !workflowId) {
@@ -311,7 +479,14 @@
                 return;
             }
 
-            (workflow.versions || []).forEach(version => {
+            let versions = workflow.versions || [];
+            const species = document.getElementById('species').value;
+            const startingData = document.getElementById('startingData').value;
+            if ((!versions || versions.length === 0) && species && startingData) {
+                versions = await ensureWorkflowVersions(workflowId, species, startingData);
+            }
+
+            (versions || []).forEach(version => {
                 const option = document.createElement('option');
                 option.value = version.id;
                 option.textContent = version.id;
@@ -1262,7 +1437,17 @@
 
         // Populate workflow versions when workflow type changes
         document.getElementById('workflowType').addEventListener('change', async (e) => {
-            populateVersionOptions(e.target.value);
+            await populateVersionOptions(e.target.value);
+        });
+
+        document.getElementById('species').addEventListener('change', async () => {
+            const workflowId = document.getElementById('workflowType').value;
+            if (workflowId) await populateVersionOptions(workflowId);
+        });
+
+        document.getElementById('startingData').addEventListener('change', async () => {
+            const workflowId = document.getElementById('workflowType').value;
+            if (workflowId) await populateVersionOptions(workflowId);
         });
 
         async function loadWorkflowConfig() {
@@ -1292,13 +1477,40 @@
                 if (!selectedDefinition) {
                     throw new Error(`No config template found for ${workflowType}/${version}`);
                 }
-                const configResponse = await fetch(
-                    `${API_BASE}/api/workflow-template?workflow=${encodeURIComponent(workflowType)}&version=${encodeURIComponent(version)}`
-                );
-                if (!configResponse.ok) {
-                    throw new Error(`Failed to load config template: ${configResponse.status}`);
+                let configPayload = null;
+                try {
+                    const configResponse = await fetch(
+                        `${API_BASE}/api/workflow-template?workflow=${encodeURIComponent(workflowType)}&version=${encodeURIComponent(version)}`
+                    );
+                    if (configResponse.ok) {
+                        configPayload = await configResponse.json();
+                    }
+                } catch (_error) {
+                    // Fall through to direct GitLab lookup and then static bundled files.
                 }
-                const configPayload = await configResponse.json();
+
+                if (!configPayload) {
+                    try {
+                        configPayload = await fetchWorkflowTemplateFromGitLab(workflowType, version, species, startingData);
+                    } catch (_error) {
+                        const versionDef = selectedDefinition.version || {};
+                        if (!versionDef.config) {
+                            throw new Error(`No static config path found for ${workflowType}/${version}`);
+                        }
+                        const [configResponse, uiResponse] = await Promise.all([
+                            fetch(versionDef.config),
+                            versionDef.ui ? fetch(versionDef.ui) : Promise.resolve(null)
+                        ]);
+                        if (!configResponse.ok) {
+                            throw new Error(`Failed to load static config template: ${configResponse.status}`);
+                        }
+                        configPayload = {
+                            config: await configResponse.text(),
+                            ui: uiResponse && uiResponse.ok ? await uiResponse.json() : {}
+                        };
+                    }
+                }
+
                 const workflowConfigText = configPayload.config;
                 const workflowConfig = parseConfigFile(workflowConfigText, configPayload.ui || {});
                 applyRuntimeDefaults(workflowConfig.paramMap);
