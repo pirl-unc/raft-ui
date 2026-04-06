@@ -241,156 +241,6 @@
 
         // API configuration
         const API_BASE = window.location.origin;
-        const GITLAB_API_BASE = 'https://gitlab.com/api/v4';
-        const GITLAB_WORKFLOW_GROUPS = [
-            'reproducible-analyses-framework-and-tools/workflow-configs',
-            'reproducible-analyses-framework-and-tools/nextflow/workflows'
-        ];
-
-        function parseWorkflowRepoName(name) {
-            const parts = String(name || '').split('-');
-            if (parts.length < 3) return null;
-            const input = parts.pop();
-            const species = parts.pop();
-            const workflow = parts.join('-');
-            if (!workflow || !species || !input) return null;
-            return { workflow, species, input };
-        }
-
-        function labelFromWorkflowId(workflowId) {
-            const upper = String(workflowId || '').toUpperCase();
-            if (upper === 'LENS') return 'LENS - Landscape of Effective Neoantigens Software';
-            return String(workflowId || '').replace(/[-_]/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
-        }
-
-        function normalizeVersionRef(workflowId, version) {
-            const value = String(version || '').trim();
-            if (!value) return '';
-            if (value.startsWith(`${workflowId}-`)) return value;
-            if (value.startsWith('v')) return `${workflowId}-${value}`;
-            return `${workflowId}-v${value}`;
-        }
-
-        async function fetchJson(url) {
-            const response = await fetch(url);
-            if (!response.ok) {
-                throw new Error(`${response.status}`);
-            }
-            return response.json();
-        }
-
-        async function fetchText(url) {
-            const response = await fetch(url);
-            if (!response.ok) {
-                throw new Error(`${response.status}`);
-            }
-            return response.text();
-        }
-
-        async function discoverWorkflowsFromGitLab() {
-            for (const groupPath of GITLAB_WORKFLOW_GROUPS) {
-                try {
-                    const groupId = encodeURIComponent(groupPath);
-                    const projects = await fetchJson(`${GITLAB_API_BASE}/groups/${groupId}/projects?include_subgroups=true&per_page=100`);
-                    const workflowsMap = new Map();
-                    projects.forEach(project => {
-                        const parsed = parseWorkflowRepoName(project.name);
-                        if (!parsed) return;
-                        const entry = workflowsMap.get(parsed.workflow) || {
-                            id: parsed.workflow,
-                            label: labelFromWorkflowId(parsed.workflow),
-                            default_version: '',
-                            versions: [],
-                            projects: []
-                        };
-                        entry.projects.push({
-                            id: project.id,
-                            path_with_namespace: project.path_with_namespace,
-                            name: project.name,
-                            species: parsed.species,
-                            input: parsed.input,
-                            default_branch: project.default_branch || ''
-                        });
-                        workflowsMap.set(parsed.workflow, entry);
-                    });
-                    const workflows = Array.from(workflowsMap.values()).sort((a, b) => a.id.localeCompare(b.id));
-                    return { workflows, _source: 'gitlab' };
-                } catch (_error) {
-                    // Try next candidate group.
-                }
-            }
-            throw new Error('Unable to load workflow index from GitLab');
-        }
-
-        async function ensureWorkflowVersions(workflowId, species, startingData) {
-            if (!workflowDefinitions || !workflowDefinitions.workflows) return [];
-            const workflow = workflowDefinitions.workflows.find(wf => wf.id === workflowId);
-            if (!workflow) return [];
-            const matchingProjects = (workflow.projects || []).filter(p => p.species === species && p.input === startingData);
-            if (matchingProjects.length === 0) return workflow.versions || [];
-
-            const versionsMap = new Map();
-            for (const project of matchingProjects) {
-                try {
-                    const branches = await fetchJson(`${GITLAB_API_BASE}/projects/${project.id}/repository/branches?per_page=100`);
-                    branches.forEach(branch => {
-                        const id = branch.name;
-                        if (!versionsMap.has(id)) {
-                            versionsMap.set(id, {
-                                id,
-                                species: [species],
-                                starting_data: [startingData],
-                                project_id: project.id,
-                                project_name: project.name,
-                                project_path_with_namespace: project.path_with_namespace
-                            });
-                        }
-                    });
-                } catch (_error) {
-                    // Keep going; another matching project may still work.
-                }
-            }
-
-            workflow.versions = Array.from(versionsMap.values()).sort((a, b) => a.id.localeCompare(b.id));
-            if (!workflow.default_version && workflow.versions.length > 0) {
-                workflow.default_version = workflow.versions[0].id;
-            }
-            return workflow.versions;
-        }
-
-        async function fetchWorkflowTemplateFromGitLab(workflowType, version, species, startingData) {
-            if (!workflowDefinitions || !workflowDefinitions.workflows) {
-                throw new Error('Workflow definitions not loaded');
-            }
-            const workflow = workflowDefinitions.workflows.find(wf => wf.id === workflowType);
-            if (!workflow) throw new Error(`Unknown workflow ${workflowType}`);
-            const versionDef = (workflow.versions || []).find(ver => ver.id === version);
-            let projectId = versionDef && versionDef.project_id;
-            if (!projectId) {
-                const project = (workflow.projects || []).find(p => p.species === species && p.input === startingData);
-                if (!project) throw new Error(`No GitLab workflow repo found for ${workflowType}/${species}/${startingData}`);
-                projectId = project.id;
-            }
-
-            const ref = normalizeVersionRef(workflowType, version);
-            const candidates = [
-                `${workflowType}.${species}.${startingData}.workflow-ui.json`,
-                'workflow-ui.json'
-            ];
-            let uiMeta = {};
-            for (const candidate of candidates) {
-                try {
-                    uiMeta = JSON.parse(await fetchText(`${GITLAB_API_BASE}/projects/${projectId}/repository/files/${encodeURIComponent(candidate)}/raw?ref=${encodeURIComponent(ref)}`));
-                    break;
-                } catch (_error) {
-                    // try next candidate
-                }
-            }
-
-            const configPath = uiMeta.config || `${workflowType}.${species}.${startingData}.config`;
-            const configText = await fetchText(`${GITLAB_API_BASE}/projects/${projectId}/repository/files/${encodeURIComponent(configPath)}/raw?ref=${encodeURIComponent(ref)}`);
-            return { config: configText, ui: uiMeta.ui || {} };
-        }
 
         // State management
         const state = {
@@ -434,29 +284,11 @@
         }
 
         async function loadWorkflowDefinitions() {
-            let payload = null;
-            try {
-                const response = await fetch(`${API_BASE}/api/workflow-definitions`);
-                if (response.ok) {
-                    payload = await response.json();
-                }
-            } catch (_error) {
-                // Fall through to direct GitLab lookup and then static bundled definitions.
+            const response = await fetch(`${API_BASE}/api/workflow-definitions`);
+            if (!response.ok) {
+                throw new Error(`Unable to load workflow index: ${response.status}`);
             }
-
-            if (!payload) {
-                try {
-                    payload = await discoverWorkflowsFromGitLab();
-                } catch (_error) {
-                    const response = await fetch('workflows/index.json');
-                    if (!response.ok) {
-                        throw new Error(`Unable to load workflow index: ${response.status}`);
-                    }
-                    payload = await response.json();
-                }
-            }
-
-            workflowDefinitions = payload;
+            workflowDefinitions = await response.json();
 
             const workflowSelect = document.getElementById('workflowType');
             workflowSelect.innerHTML = '<option value="">Select workflow...</option>';
@@ -468,7 +300,7 @@
             });
         }
 
-        async function populateVersionOptions(workflowId) {
+        function populateVersionOptions(workflowId) {
             const versionSelect = document.getElementById('workflowVersion');
             versionSelect.innerHTML = '<option value="">Select version...</option>';
             if (!workflowDefinitions || !workflowId) {
@@ -479,14 +311,7 @@
                 return;
             }
 
-            let versions = workflow.versions || [];
-            const species = document.getElementById('species').value;
-            const startingData = document.getElementById('startingData').value;
-            if ((!versions || versions.length === 0) && species && startingData) {
-                versions = await ensureWorkflowVersions(workflowId, species, startingData);
-            }
-
-            (versions || []).forEach(version => {
+            (workflow.versions || []).forEach(version => {
                 const option = document.createElement('option');
                 option.value = version.id;
                 option.textContent = version.id;
@@ -1437,17 +1262,7 @@
 
         // Populate workflow versions when workflow type changes
         document.getElementById('workflowType').addEventListener('change', async (e) => {
-            await populateVersionOptions(e.target.value);
-        });
-
-        document.getElementById('species').addEventListener('change', async () => {
-            const workflowId = document.getElementById('workflowType').value;
-            if (workflowId) await populateVersionOptions(workflowId);
-        });
-
-        document.getElementById('startingData').addEventListener('change', async () => {
-            const workflowId = document.getElementById('workflowType').value;
-            if (workflowId) await populateVersionOptions(workflowId);
+            populateVersionOptions(e.target.value);
         });
 
         async function loadWorkflowConfig() {
@@ -1477,42 +1292,15 @@
                 if (!selectedDefinition) {
                     throw new Error(`No config template found for ${workflowType}/${version}`);
                 }
-                let configPayload = null;
-                try {
-                    const configResponse = await fetch(
-                        `${API_BASE}/api/workflow-template?workflow=${encodeURIComponent(workflowType)}&version=${encodeURIComponent(version)}`
-                    );
-                    if (configResponse.ok) {
-                        configPayload = await configResponse.json();
-                    }
-                } catch (_error) {
-                    // Fall through to direct GitLab lookup and then static bundled files.
+                const configResponse = await fetch(
+                    `${API_BASE}/api/workflow-template?workflow=${encodeURIComponent(workflowType)}&version=${encodeURIComponent(version)}`
+                );
+                if (!configResponse.ok) {
+                    throw new Error(`Failed to load config template: ${configResponse.status}`);
                 }
-
-                if (!configPayload) {
-                    try {
-                        configPayload = await fetchWorkflowTemplateFromGitLab(workflowType, version, species, startingData);
-                    } catch (_error) {
-                        const versionDef = selectedDefinition.version || {};
-                        if (!versionDef.config) {
-                            throw new Error(`No static config path found for ${workflowType}/${version}`);
-                        }
-                        const [configResponse, uiResponse] = await Promise.all([
-                            fetch(versionDef.config),
-                            versionDef.ui ? fetch(versionDef.ui) : Promise.resolve(null)
-                        ]);
-                        if (!configResponse.ok) {
-                            throw new Error(`Failed to load static config template: ${configResponse.status}`);
-                        }
-                        configPayload = {
-                            config: await configResponse.text(),
-                            ui: uiResponse && uiResponse.ok ? await uiResponse.json() : {}
-                        };
-                    }
-                }
-
+                const configPayload = await configResponse.json();
                 const workflowConfigText = configPayload.config;
-                const workflowConfig = parseConfigFile(workflowConfigText, configPayload.ui || {});
+                const workflowConfig = parseConfigFile(workflowConfigText);
                 applyRuntimeDefaults(workflowConfig.paramMap);
                 
                 // Collect all tool names from the config
@@ -1563,7 +1351,7 @@
             }
         }
 
-        function parseConfigFile(configText, uiHints = {}) {
+        function parseConfigFile(configText) {
             const lines = configText.split('\n');
             const paramMap = {};
             
@@ -1580,7 +1368,7 @@
                 }
             }
             
-            const structure = buildWorkflowStructure(paramMap, uiHints);
+            const structure = buildWorkflowStructure(paramMap);
             structure.paramMap = paramMap;
             return structure;
         }
@@ -1599,16 +1387,13 @@
             state.maxCpus = defaultMaxCpus;
         }
 
-        function buildWorkflowStructure(paramMap, uiHints = {}) {
-            if (uiHints.sections && Array.isArray(uiHints.sections) && uiHints.sections.length > 0) {
-                return buildWorkflowStructureFromHints(paramMap, uiHints);
-            }
+        function buildWorkflowStructure(paramMap) {
             const structure = {
                 sections: []
             };
             
             // Define which parameters are workflow parameters (not tools or tool_parameters or refs)
-            const workflowParamNames = uiHints.workflow_param_names || [
+            const workflowParamNames = [
                 'combine_strategy', 
                 'peptide_lengths',
                 'tpm_threshold',
@@ -1777,21 +1562,7 @@
                 }
                 
                 // Add References subsection to LENS section
-                if (Array.isArray(uiHints.global_references) && uiHints.global_references.length > 0) {
-                    const referencesSubsection = {
-                        name: 'references',
-                        displayName: 'References',
-                        workflowParams: uiHints.global_references.map(ref => ({
-                            name: ref.name,
-                            parameter: ref.parameter,
-                            value: (paramMap[(ref.parameter || '').replace(/^params\./, '')] || ref.default || '').replace('${params.ref_dir}/', ''),
-                            description: ref.description || '',
-                            isReference: true
-                        })),
-                        steps: []
-                    };
-                    section.subsections.push(referencesSubsection);
-                } else if (sectionName === 'lens') {
+                if (sectionName === 'lens') {
                     const referencesSubsection = {
                         name: 'references',
                         displayName: 'References',
@@ -1844,81 +1615,6 @@
                 structure.sections.push(section);
             }
             
-            return structure;
-        }
-
-        function buildWorkflowStructureFromHints(paramMap, uiHints = {}) {
-            const structure = { sections: [] };
-
-            const normalizeWorkflowParam = (param) => {
-                const fullParam = param.parameter || '';
-                const shortName = param.name || fullParam.split('$').slice(-1)[0].replace(/^params\./, '');
-                const paramKey = fullParam.replace(/^params\./, '');
-                const rawValue = Object.prototype.hasOwnProperty.call(paramMap, paramKey)
-                    ? paramMap[paramKey]
-                    : (param.value ?? param.default ?? '');
-                return {
-                    name: shortName,
-                    parameter: fullParam,
-                    value: String(rawValue).replace('${params.ref_dir}/', ''),
-                    description: param.description || '',
-                    isReference: !!param.isReference
-                };
-            };
-
-            const normalizeTool = (tool) => {
-                const defaultValue = tool.default || '';
-                const alternateTools = Array.isArray(tool.alternate_tools) ? tool.alternate_tools : [];
-                const options = getToolOptions(tool.name || '', defaultValue);
-                alternateTools.forEach(option => {
-                    if (!options.find(existing => existing.value === option)) {
-                        options.push({ value: option, label: humanReadableName(option) });
-                    }
-                });
-                return {
-                    ...tool,
-                    displayName: humanReadableName(tool.name || ''),
-                    multiSelect: tool.multiSelect !== false,
-                    singleUse: isSingleUseTool(tool.name || ''),
-                    options,
-                    warning: isSingleUseTool(tool.name || '')
-                        ? 'Only the first selected tool will be used for downstream analysis. Additional tools will run but their outputs will not be passed forward.'
-                        : null
-                };
-            };
-
-            (uiHints.sections || []).forEach(sectionHint => {
-                const section = {
-                    name: sectionHint.name,
-                    displayName: sectionHint.display_name || humanReadableName(sectionHint.name),
-                    subsections: []
-                };
-
-                (sectionHint.subsections || []).forEach(subsectionHint => {
-                    const subsection = {
-                        name: subsectionHint.name,
-                        displayName: subsectionHint.display_name || humanReadableName(subsectionHint.name),
-                        workflowParams: (subsectionHint.workflowParams || subsectionHint.workflow_parameters || []).map(normalizeWorkflowParam),
-                        steps: []
-                    };
-
-                    (subsectionHint.steps || []).forEach(stepHint => {
-                        const step = {
-                            name: stepHint.name,
-                            displayName: stepHint.display_name || humanReadableName(stepHint.name),
-                            parameter: stepHint.parameter || '',
-                            workflowParams: (stepHint.workflowParams || stepHint.workflow_parameters || stepHint.references || []).map(normalizeWorkflowParam),
-                            tools: (stepHint.tools || stepHint.tool_parameters || []).map(normalizeTool)
-                        };
-                        subsection.steps.push(step);
-                    });
-
-                    section.subsections.push(subsection);
-                });
-
-                structure.sections.push(section);
-            });
-
             return structure;
         }
         
