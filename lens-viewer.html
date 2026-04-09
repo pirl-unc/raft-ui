@@ -18,13 +18,23 @@
   <div id="root"></div>
   <script type="text/babel" data-presets="react">
     const { useState, useMemo, useEffect, useCallback } = React;
-    const { Upload, ChevronDown, ChevronRight, ChevronLeft, Download, Filter, X, Loader } = lucideReact;
+    const { Upload, Download, Loader } = LucideReact;
 
     const API_BASE = window.location.origin;
+    const DEMO_FILENAME = 'demo-PT001-ad-report.tsv';
+    const DEMO_TSV = `peptide\tallele\tpriority_score_maximum\tpriority_score_mhcflurry\tmhcflurry_2.1.1.aff\tccf\tvaf\tantigen_source
+SLYNTVATL\tHLA-A*02:01\t0.9821\t0.9512\t42.1\t0.81\t0.44\tSNV
+GLCTLVAML\tHLA-A*02:01\t0.9435\t0.9277\t58.4\t0.73\t0.38\tFusion
+NLVPMVATV\tHLA-A*02:01\t0.9011\t0.8842\t77.9\t0.68\t0.31\tSplice
+LLFGYPVYV\tHLA-A*02:01\t0.8774\t0.8610\t93.5\t0.52\t0.26\tERV
+YVLDHLIVV\tHLA-B*07:02\t0.8459\t0.8114\t120.7\t0.47\t0.22\tSNV
+TPRVTGGGAM\tHLA-B*07:02\t0.8012\t0.7765\t155.6\t0.42\t0.19\tIndel
+KLGGALQAK\tHLA-A*03:01\t0.7654\t0.7418\t188.3\t0.35\t0.15\tSNV`;
 
     const getUrlParams = () => {
       const params = new URLSearchParams(window.location.search);
       return {
+        demo: params.get('demo') === '1',
         preload: params.get('preload') || '',
         projectId: params.get('project_id') || ''
       };
@@ -72,6 +82,16 @@
 
       useEffect(() => {
         const urlParams = getUrlParams();
+        if (urlParams.demo) {
+          const parsed = parseFileContent(DEMO_FILENAME, DEMO_TSV, {});
+          setPatients({ ...parsed });
+          const firstId = Object.keys(parsed).sort()[0];
+          if (firstId) {
+            setSelectedPatient(firstId);
+            setSelectedAlleles(new Set(parsed[firstId].alleles));
+          }
+          return;
+        }
         if (!urlParams.preload) return;
         const loadFiles = async () => {
           setIsPreloading(true);
@@ -176,7 +196,8 @@
                   {preloadError && <div style={{ background: '#fff5f5', border: '1px solid #feb2b2', padding: '1rem', marginBottom: '1.5rem', color: '#c53030', borderRadius: '8px' }}>{preloadError}</div>}
                   <Upload size={64} style={{ margin: '0 auto 1.5rem', color: '#495057' }} />
                   <h2 style={{ fontSize: '1.75rem', marginBottom: '1rem' }}>Upload LENS Reports</h2>
-                  <p style={{ color: '#6c757d', marginBottom: '2rem' }}>Select TSV report files to begin analysis.</p>
+                  <p style={{ color: '#6c757d', marginBottom: '1rem' }}>Select TSV report files to begin analysis.</p>
+                  <p style={{ color: '#6c757d', marginBottom: '2rem' }}>For a built-in sample on static hosting, open <span style={{ fontFamily: 'monospace' }}>?demo=1</span>.</p>
                   <label style={{ display: 'inline-block', padding: '1rem 2.5rem', background: 'linear-gradient(135deg, #ff6b6b 0%, #ee5a6f 100%)', color: '#fff', borderRadius: '8px', cursor: 'pointer', fontSize: '1.1rem', fontWeight: 600 }}>
                     Choose Files
                     <input type="file" multiple accept=".tsv,.txt" onChange={handleFileUpload} style={{ display: 'none' }} />
