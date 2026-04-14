@@ -1,1 +1,1096 @@
-/home/ubuntu/dev/raft/src/raft/ui/static/cloud-launcher.html
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>RAFT Cloud Launcher</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <script src="https://accounts.google.com/gsi/client" async></script>
+  <script>
+    window.addEventListener('load', function() {
+      setTimeout(function() {
+        var root = document.getElementById('root');
+        if (root && root.querySelector('p') && root.textContent.includes('Loading RAFT')) {
+          var missing = [];
+          if (typeof React === 'undefined') missing.push('React');
+          if (typeof ReactDOM === 'undefined') missing.push('ReactDOM');
+          if (typeof Babel === 'undefined') missing.push('Babel');
+          if (missing.length > 0) {
+            root.innerHTML = '<div style="padding: 2rem; font-family: system-ui, sans-serif; max-width: 600px;">' +
+              '<h2 style="color: #dc2626; margin-bottom: 1rem;">Failed to load dependencies</h2>' +
+              '<p style="margin-bottom: 0.5rem;">The following CDN resources failed to load: <strong>' + missing.join(', ') + '</strong></p>' +
+              '<p style="color: #666;">This may be due to network issues or a firewall blocking CDN access.</p>' +
+              '<p style="margin-top: 1rem;"><a href="javascript:location.reload()" style="color: #2563eb;">Click here to retry</a></p>' +
+              '</div>';
+          }
+        }
+      }, 3000);
+    });
+  </script>
+</head>
+<body class="bg-gray-50 min-h-screen">
+  <div id="root">
+    <div style="padding: 2rem; font-family: system-ui, sans-serif;">
+      <p>Loading RAFT Cloud Launcher...</p>
+      <p style="color: #666; font-size: 0.875rem;">If this message persists, check your browser console for errors.</p>
+    </div>
+  </div>
+  <script type="text/babel" data-presets="react">
+    const { useState, useEffect, useCallback, useRef } = React;
+
+    // ─── Provider Configuration ────────────────────────────────────────────────
+    // Replace these before publishing to GitHub Pages.
+    const GOOGLE_OAUTH_CLIENT_ID = 'YOUR_GOOGLE_OAUTH_CLIENT_ID';
+    const RAFT_RUNNER_IMAGE = 'YOUR_RUNNER_IMAGE_URI';
+    // ──────────────────────────────────────────────────────────────────────────
+
+    // ─── Data Constants ────────────────────────────────────────────────────────
+    const WORKFLOWS = [
+      { value: 'lens', label: 'LENS (Tumor Antigens)', description: 'Complete tumor antigen prediction from SNVs, InDels, fusions, splice variants, ERVs, viruses, and CTAs', requirements: { tumor_dna: true, normal_dna: true, tumor_rna: true, normal_rna: false } },
+      { value: 'somatic-snvs', label: 'Somatic SNVs', description: 'SNV calling from paired tumor/normal DNA', requirements: { tumor_dna: true, normal_dna: true, tumor_rna: false, normal_rna: false } },
+      { value: 'somatic-indels', label: 'Somatic InDels', description: 'InDel calling from paired tumor/normal DNA', requirements: { tumor_dna: true, normal_dna: true, tumor_rna: false, normal_rna: false } },
+      { value: 'gene-fusions', label: 'Gene Fusions', description: 'Fusion gene detection from tumor RNA-seq', requirements: { tumor_dna: false, normal_dna: false, tumor_rna: true, normal_rna: false } },
+      { value: 'splice-variants', label: 'Splice Variants', description: 'Aberrant splicing from tumor RNA', requirements: { tumor_dna: false, normal_dna: false, tumor_rna: true, normal_rna: false } },
+      { value: 'rna-quant', label: 'RNA Quantification', description: 'Transcript abundance from RNA-seq', requirements: { tumor_dna: false, normal_dna: false, tumor_rna: true, normal_rna: false } },
+      { value: 'hla-typing', label: 'HLA Typing', description: 'HLA allele determination from DNA', requirements: { tumor_dna: false, normal_dna: true, tumor_rna: false, normal_rna: false } },
+      { value: 'viral-detection', label: 'Viral Detection', description: 'Viral sequence identification from RNA', requirements: { tumor_dna: false, normal_dna: false, tumor_rna: true, normal_rna: false } },
+      { value: 'erv-detection', label: 'ERV Detection', description: 'Endogenous retrovirus expression from RNA', requirements: { tumor_dna: false, normal_dna: false, tumor_rna: true, normal_rna: false } },
+    ];
+
+    const REGIONS = ['us-central1','us-east1','us-east4','us-west1','us-west2','us-west4','europe-west1','europe-west2','europe-west4','asia-east1','asia-northeast1','asia-southeast1'];
+
+    const MACHINE_TYPES = [
+      { value: 'n2-standard-8',  label: 'n2-standard-8 (8 vCPU, 32 GB)',   cpu: 8,  mem: '32' },
+      { value: 'n2-standard-16', label: 'n2-standard-16 (16 vCPU, 64 GB)',  cpu: 16, mem: '64' },
+      { value: 'n2-standard-32', label: 'n2-standard-32 (32 vCPU, 128 GB)', cpu: 32, mem: '128' },
+      { value: 'n2-standard-64', label: 'n2-standard-64 (64 vCPU, 256 GB)', cpu: 64, mem: '256' },
+      { value: 'n2-highmem-16',  label: 'n2-highmem-16 (16 vCPU, 128 GB)', cpu: 16, mem: '128' },
+      { value: 'n2-highmem-32',  label: 'n2-highmem-32 (32 vCPU, 256 GB)', cpu: 32, mem: '256' },
+    ];
+
+    // ─── Helper Functions ──────────────────────────────────────────────────────
+    const getSampleType = (runName) => {
+      if (!runName) return null;
+      const prefix = runName.substring(0, 3).toLowerCase();
+      return { 'ad-': { type: 'Tumor DNA', isNormal: false }, 'nd-': { type: 'Normal DNA', isNormal: true }, 'ar-': { type: 'Tumor RNA', isNormal: false }, 'nr-': { type: 'Normal RNA', isNormal: true } }[prefix] || null;
+    };
+    const getSeqMethod = (runName) => { const t = getSampleType(runName); return t && t.type.includes('RNA') ? 'RNA-Seq' : 'WES'; };
+    const normalizeBucket = (val) => { val = (val || '').trim().replace(/\/+$/, ''); if (val.startsWith('gs://')) { const rest = val.slice(5).trim(); return rest ? `gs://${rest}` : ''; } return val ? `gs://${val}` : ''; };
+    const extractBucketName = (val) => normalizeBucket(val).replace('gs://', '').split('/')[0];
+    const generateJobId = () => `raft-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+
+    // ─── GCS / Batch Helpers ───────────────────────────────────────────────────
+    const gcsUpload = async (token, bucketName, objectName, content) => {
+      const url = `https://storage.googleapis.com/upload/storage/v1/b/${encodeURIComponent(bucketName)}/o?uploadType=media&name=${encodeURIComponent(objectName)}`;
+      const resp = await fetch(url, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'text/plain' },
+        body: content,
+      });
+      if (!resp.ok) {
+        const err = await resp.json().catch(() => ({}));
+        throw new Error(err.error?.message || `GCS upload failed (${resp.status}). Check bucket CORS configuration.`);
+      }
+      return resp.json();
+    };
+
+    const submitBatchJob = async (token, projectId, region, jobId, jobSpec) => {
+      const url = `https://batch.googleapis.com/v1/projects/${encodeURIComponent(projectId)}/locations/${region}/jobs?jobId=${encodeURIComponent(jobId)}`;
+      const resp = await fetch(url, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify(jobSpec),
+      });
+      if (!resp.ok) {
+        const err = await resp.json().catch(() => ({}));
+        throw new Error(err.error?.message || `Batch submission failed (${resp.status})`);
+      }
+      return resp.json();
+    };
+
+    const buildBatchJobSpec = ({ runnerImage, runnerSA, cloudRoot, machineType, maxMem, maxCpu, manifestFilename, raftProjectId, workflow, version, species, timeoutMinutes }) => {
+      const commands = [
+        'run-ots',
+        '-p', raftProjectId,
+        '-w', workflow,
+        '-v', version,
+        '-m', manifestFilename,
+        '--cloud', cloudRoot,
+        '--max-mem', maxMem,
+        '--max-cpu', String(maxCpu),
+        '--default',
+        '--species', species,
+      ];
+      const allocationPolicy = {
+        instances: [{ policy: { machineType } }],
+      };
+      if (runnerSA) {
+        allocationPolicy.serviceAccount = { email: runnerSA };
+      }
+      return {
+        taskGroups: [{
+          taskSpec: {
+            runnables: [{ container: { imageUri: runnerImage, commands } }],
+            maxRetryCount: 1,
+            maxRunDuration: `${timeoutMinutes * 60}s`,
+          },
+          taskCount: 1,
+        }],
+        allocationPolicy,
+        logsPolicy: { destination: 'CLOUD_LOGGING' },
+        labels: { tool: 'raft', workflow: workflow.replace(/[^a-z0-9-]/g, '-') },
+      };
+    };
+
+    // ─── SVG Icon Components ───────────────────────────────────────────────────
+    const Icon = ({ d, size = 20, className = '' }) => (
+      <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24"
+           fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
+           className={className}>{d}</svg>
+    );
+
+    const Check = ({ size, className }) => <Icon size={size} className={className} d={<polyline points="20 6 9 17 4 12"/>} />;
+    const ChevronRight = ({ size, className }) => <Icon size={size} className={className} d={<polyline points="9 18 15 12 9 6"/>} />;
+    const Plus = ({ size, className }) => <Icon size={size} className={className} d={<><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></>} />;
+    const Trash2 = ({ size, className }) => <Icon size={size} className={className} d={<><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></>} />;
+    const CloudIcon = ({ size, className }) => <Icon size={size} className={className} d={<path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z"/>} />;
+    const RocketIcon = ({ size, className }) => <Icon size={size} className={className} d={<><path d="M4.5 16.5c-1.5 1.26-2 5-2 5s3.74-.5 5-2c.71-.84.7-2.13-.09-2.91a2.18 2.18 0 0 0-2.91-.09z"/><path d="m3.5 14.5 1-1 1.5 1.5-1 1z"/><path d="M20 4 8.5 15.5l-5 1 1-5L16 4a2.828 2.828 0 1 1 4 4z"/></>} />;
+    const AlertCircle = ({ size, className }) => <Icon size={size} className={className} d={<><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></>} />;
+    const InfoIcon = ({ size, className }) => <Icon size={size} className={className} d={<><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></>} />;
+    const UserIcon = ({ size, className }) => <Icon size={size} className={className} d={<><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></>} />;
+    const ExternalLink = ({ size, className }) => <Icon size={size} className={className} d={<><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></>} />;
+
+    // ─── UI Primitive Components ───────────────────────────────────────────────
+    const Field = ({ label, required, hint, error, children }) => (
+      <div className="mb-4">
+        {label && (
+          <label className="block text-sm font-medium text-gray-700 mb-1">
+            {label}{required && <span className="text-red-500 ml-1">*</span>}
+          </label>
+        )}
+        {children}
+        {hint && !error && <p className="mt-1 text-xs text-gray-500">{hint}</p>}
+        {error && <p className="mt-1 text-xs text-red-600 flex items-center gap-1"><AlertCircle size={12} />{error}</p>}
+      </div>
+    );
+
+    const TextInput = (props) => (
+      <input
+        {...props}
+        className={`w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent ${props.className || ''}`}
+      />
+    );
+
+    const SelectInput = ({ children, ...props }) => (
+      <select
+        {...props}
+        className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
+      >
+        {children}
+      </select>
+    );
+
+    // ─── StepIndicator ─────────────────────────────────────────────────────────
+    const STEPS = ['Cloud Setup', 'Manifest', 'Job Settings', 'Review & Launch'];
+
+    const StepIndicator = ({ currentStep }) => (
+      <div className="flex items-center justify-center mb-8">
+        {STEPS.map((label, idx) => {
+          const stepNum = idx + 1;
+          const isCompleted = stepNum < currentStep;
+          const isActive = stepNum === currentStep;
+          return (
+            <React.Fragment key={stepNum}>
+              <div className="flex flex-col items-center">
+                <div className={`w-9 h-9 rounded-full flex items-center justify-center text-sm font-semibold border-2 transition-all
+                  ${isCompleted ? 'bg-green-500 border-green-500 text-white' : isActive ? 'bg-blue-600 border-blue-600 text-white' : 'bg-white border-gray-300 text-gray-400'}`}>
+                  {isCompleted ? <Check size={16} /> : stepNum}
+                </div>
+                <span className={`mt-1.5 text-xs font-medium whitespace-nowrap ${isActive ? 'text-blue-600' : isCompleted ? 'text-green-600' : 'text-gray-400'}`}>
+                  {label}
+                </span>
+              </div>
+              {idx < STEPS.length - 1 && (
+                <div className={`h-0.5 w-16 mx-2 mb-5 transition-all ${stepNum < currentStep ? 'bg-green-400' : 'bg-gray-200'}`} />
+              )}
+            </React.Fragment>
+          );
+        })}
+      </div>
+    );
+
+    // ─── Step 1: Cloud Setup ───────────────────────────────────────────────────
+    const CloudSetupStep = ({ cloudConfig, onChange, errors }) => {
+      const origin = window.location.origin;
+      const bucket = `gs://${extractBucketName(cloudConfig.bucket) || 'YOUR_BUCKET'}`;
+      const project = cloudConfig.projectId || 'YOUR_PROJECT_ID';
+      const email = cloudConfig.userEmail || 'YOUR_EMAIL';
+      const runnerSA = cloudConfig.runnerSA || 'YOUR_RUNNER_SA';
+      const setupCommands = `# Enable required APIs
+gcloud services enable batch.googleapis.com storage.googleapis.com \\
+  --project ${project}
+
+# Configure CORS on your bucket (allows this page to upload manifests directly)
+cat > /tmp/raft-cors.json << 'EOF'
+[{"origin":["${origin}"],"method":["GET","POST","PUT"],"responseHeader":["Content-Type","Authorization"],"maxAgeSeconds":3600}]
+EOF
+gcloud storage buckets update ${bucket} --cors-file=/tmp/raft-cors.json
+
+# Grant your account permission to submit Batch jobs
+# (requires project-level admin — ask your GCP project owner if this fails)
+gcloud projects add-iam-policy-binding ${project} \\
+  --member="user:${email}" --role="roles/batch.jobsEditor"
+
+# Grant your account storage write access at the bucket level
+gcloud storage buckets add-iam-policy-binding ${bucket} \\
+  --member="user:${email}" --role="roles/storage.objectAdmin"
+
+# Grant the runner service account storage access for workflow execution
+gcloud storage buckets add-iam-policy-binding ${bucket} \\
+  --member="serviceAccount:${runnerSA}" --role="roles/storage.objectAdmin"
+
+# Grant the runner service account logging and monitoring access
+# (requires project-level admin — ask your GCP project owner if this fails)
+gcloud projects add-iam-policy-binding ${project} \\
+  --member="serviceAccount:${runnerSA}" --role="roles/logging.logWriter"
+gcloud projects add-iam-policy-binding ${project} \\
+  --member="serviceAccount:${runnerSA}" --role="roles/monitoring.metricWriter"`;
+
+      return (
+        <div>
+          <h2 className="text-lg font-semibold text-gray-900 mb-1">Cloud Setup</h2>
+          <p className="text-sm text-gray-500 mb-4">Configure your GCP project and storage for RAFT jobs.</p>
+
+          <div className="mb-6 rounded-lg border border-green-200 bg-green-50 p-4 text-sm text-green-800">
+            <p className="font-semibold mb-1">Your data stays in your cloud</p>
+            <ul className="space-y-0.5 text-green-700">
+              <li>• RAFT runs entirely within your GCP project using your own credentials</li>
+              <li>• Compute costs are billed directly to your account</li>
+              <li>• Your data never leaves your GCS bucket</li>
+              <li>• No credentials, tokens, or results are stored by this tool</li>
+            </ul>
+          </div>
+
+          <Field label="GCP Project ID" required error={errors.projectId}
+            hint="Your Google Cloud project identifier (e.g. my-project-123)">
+            <TextInput
+              placeholder="my-gcp-project"
+              value={cloudConfig.projectId}
+              onChange={e => onChange({ ...cloudConfig, projectId: e.target.value })}
+            />
+          </Field>
+
+          <Field label="Your Google Account Email" required error={errors.userEmail}
+            hint="Used in setup commands and for workflow-related notifications">
+            <TextInput
+              placeholder="you@example.com"
+              type="email"
+              value={cloudConfig.userEmail}
+              onChange={e => onChange({ ...cloudConfig, userEmail: e.target.value })}
+            />
+          </Field>
+
+          <Field label="GCS Bucket / Cloud Root" required error={errors.bucket}
+            hint="gs://your-bucket or gs://your-bucket/path/to/root">
+            <TextInput
+              placeholder="gs://my-raft-bucket"
+              value={cloudConfig.bucket}
+              onChange={e => onChange({ ...cloudConfig, bucket: e.target.value })}
+            />
+          </Field>
+
+          <Field label="GCS Region" hint="Region for GCP Batch jobs">
+            <SelectInput
+              value={cloudConfig.region}
+              onChange={e => onChange({ ...cloudConfig, region: e.target.value })}
+            >
+              {REGIONS.map(r => <option key={r} value={r}>{r}</option>)}
+            </SelectInput>
+          </Field>
+
+          <Field label="Runner Service Account" hint="Optional — if blank, jobs run as your authenticated identity">
+            <TextInput
+              placeholder="raft-runner@my-project.iam.gserviceaccount.com"
+              value={cloudConfig.runnerSA}
+              onChange={e => onChange({ ...cloudConfig, runnerSA: e.target.value })}
+            />
+          </Field>
+
+          <Field label="Runner Docker Image URI" required error={errors.runnerImage}
+            hint="The RAFT runner container image to execute">
+            <TextInput
+              placeholder="gcr.io/my-project/raft-runner:latest"
+              value={cloudConfig.runnerImage}
+              onChange={e => onChange({ ...cloudConfig, runnerImage: e.target.value })}
+            />
+          </Field>
+
+          <div className="mt-6 rounded-lg border border-blue-200 bg-blue-50 p-4">
+            <div className="flex items-start gap-2 mb-2">
+              <InfoIcon size={16} className="text-blue-600 mt-0.5 flex-shrink-0" />
+              <span className="text-sm font-medium text-blue-800">One-time GCP setup required</span>
+            </div>
+            <details className="text-sm text-blue-700">
+              <summary className="cursor-pointer font-medium hover:text-blue-900 select-none">Show setup commands</summary>
+              <pre className="mt-3 bg-blue-900 text-blue-100 rounded-md p-3 text-xs overflow-x-auto whitespace-pre leading-relaxed">
+                {setupCommands}
+              </pre>
+            </details>
+          </div>
+        </div>
+      );
+    };
+
+    // ─── Step 2: Manifest ──────────────────────────────────────────────────────
+    const SAMPLE_TYPE_COLORS = {
+      'Tumor DNA':  'bg-red-100 text-red-700 border-red-200',
+      'Normal DNA': 'bg-blue-100 text-blue-700 border-blue-200',
+      'Tumor RNA':  'bg-purple-100 text-purple-700 border-purple-200',
+      'Normal RNA': 'bg-green-100 text-green-700 border-green-200',
+    };
+
+    const REQ_LABELS = [
+      { key: 'tumor_dna',  prefix: 'ad-', label: 'Tumor DNA' },
+      { key: 'normal_dna', prefix: 'nd-', label: 'Normal DNA' },
+      { key: 'tumor_rna',  prefix: 'ar-', label: 'Tumor RNA' },
+      { key: 'normal_rna', prefix: 'nr-', label: 'Normal RNA' },
+    ];
+
+    const MANIFEST_HEADERS = ['patient_name','run_name','dataset','file_prefix','sequencing_method','mhc_alleles'];
+
+    const ManifestStep = ({ samples, onChange, selectedWorkflow, onWorkflowChange }) => {
+      const [mode, setMode] = useState('form');
+      const [tsvText, setTsvText] = useState('');
+      const [tsvError, setTsvError] = useState('');
+      const [newSample, setNewSample] = useState({ patient_name: '', run_name: '', dataset: '', file_prefix: '', mhc_alleles: '' });
+
+      const workflow = WORKFLOWS.find(w => w.value === selectedWorkflow) || WORKFLOWS[0];
+
+      const addSample = () => {
+        if (!newSample.patient_name || !newSample.run_name || !newSample.dataset || !newSample.file_prefix) return;
+        const seq = getSeqMethod(newSample.run_name);
+        onChange([...samples, { ...newSample, sequencing_method: seq, id: Date.now() }]);
+        setNewSample({ patient_name: '', run_name: '', dataset: '', file_prefix: '', mhc_alleles: '' });
+      };
+
+      const applyTsv = () => {
+        setTsvError('');
+        try {
+          const lines = tsvText.trim().split('\n').filter(l => l.trim());
+          if (!lines.length) { setTsvError('No content to parse.'); return; }
+          const firstLine = lines[0].toLowerCase();
+          let dataLines = lines;
+          let hasHeader = MANIFEST_HEADERS.some(h => firstLine.includes(h));
+          if (hasHeader) dataLines = lines.slice(1);
+          if (!dataLines.length) { setTsvError('No data rows found after header.'); return; }
+          const parsed = dataLines.map((line, i) => {
+            const cols = line.split('\t');
+            if (cols.length < 4) throw new Error(`Row ${i+1}: expected at least 4 tab-separated columns`);
+            return {
+              id: Date.now() + i,
+              patient_name: cols[0]?.trim() || '',
+              run_name: cols[1]?.trim() || '',
+              dataset: cols[2]?.trim() || '',
+              file_prefix: cols[3]?.trim() || '',
+              sequencing_method: cols[4]?.trim() || getSeqMethod(cols[1]?.trim()),
+              mhc_alleles: cols[5]?.trim() || '',
+            };
+          });
+          onChange([...samples, ...parsed]);
+          setTsvText('');
+        } catch (e) {
+          setTsvError(e.message);
+        }
+      };
+
+      const sampleTypeBadge = (runName) => {
+        const t = getSampleType(runName);
+        if (!t) return null;
+        const cls = SAMPLE_TYPE_COLORS[t.type] || 'bg-gray-100 text-gray-700 border-gray-200';
+        return <span className={`inline-block px-2 py-0.5 rounded border text-xs font-medium ${cls}`}>{t.type}</span>;
+      };
+
+      return (
+        <div>
+          <h2 className="text-lg font-semibold text-gray-900 mb-1">Build Manifest</h2>
+          <p className="text-sm text-gray-500 mb-4">Define the samples for your RAFT run.</p>
+
+          {/* Workflow selector */}
+          <div className="mb-5">
+            <Field label="Workflow" hint="Selecting a workflow shows required sample types">
+              <SelectInput value={selectedWorkflow} onChange={e => onWorkflowChange(e.target.value)}>
+                {WORKFLOWS.map(w => <option key={w.value} value={w.value}>{w.label}</option>)}
+              </SelectInput>
+            </Field>
+            {workflow && (
+              <div className="mt-2 rounded-md border border-indigo-200 bg-indigo-50 px-4 py-3">
+                <p className="text-sm text-indigo-800 font-medium mb-1">{workflow.label}</p>
+                <p className="text-xs text-indigo-700 mb-2">{workflow.description}</p>
+                <div className="flex gap-2 flex-wrap">
+                  {REQ_LABELS.map(r => (
+                    <span key={r.key} className={`inline-flex items-center gap-1 px-2 py-0.5 rounded border text-xs font-medium
+                      ${workflow.requirements[r.key] ? 'bg-indigo-200 text-indigo-800 border-indigo-300' : 'bg-gray-100 text-gray-400 border-gray-200 line-through'}`}>
+                      {r.prefix} {r.label}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Mode toggle */}
+          <div className="flex gap-2 mb-4">
+            <button
+              onClick={() => setMode('form')}
+              className={`px-4 py-1.5 rounded-md text-sm font-medium border transition-colors ${mode === 'form' ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-gray-600 border-gray-300 hover:bg-gray-50'}`}
+            >Form entry</button>
+            <button
+              onClick={() => setMode('tsv')}
+              className={`px-4 py-1.5 rounded-md text-sm font-medium border transition-colors ${mode === 'tsv' ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-gray-600 border-gray-300 hover:bg-gray-50'}`}
+            >Paste TSV</button>
+          </div>
+
+          {mode === 'form' && (
+            <div className="rounded-lg border border-gray-200 bg-gray-50 p-4 mb-4">
+              <div className="grid grid-cols-2 gap-3 mb-3">
+                <Field label="Patient Name" required>
+                  <TextInput placeholder="Patient-01" value={newSample.patient_name} onChange={e => setNewSample({...newSample, patient_name: e.target.value})} />
+                </Field>
+                <div>
+                  <Field label="Run Name" required hint="e.g. ad-1234 (Tumor DNA), nd-5678 (Normal DNA), ar-9012 (Tumor RNA)">
+                    <TextInput placeholder="ad-1234" value={newSample.run_name} onChange={e => setNewSample({...newSample, run_name: e.target.value})} />
+                  </Field>
+                  {newSample.run_name && (
+                    <div className="mt-1">{sampleTypeBadge(newSample.run_name)}</div>
+                  )}
+                </div>
+                <Field label="Dataset" required>
+                  <TextInput placeholder="Dataset-A" value={newSample.dataset} onChange={e => setNewSample({...newSample, dataset: e.target.value})} />
+                </Field>
+                <Field label="File Prefix" required hint="Path prefix to FASTQ files in GCS">
+                  <TextInput placeholder="gs://bucket/samples/patient01" value={newSample.file_prefix} onChange={e => setNewSample({...newSample, file_prefix: e.target.value})} />
+                </Field>
+                <Field label="MHC Alleles" hint="Optional, comma-separated HLA alleles">
+                  <TextInput placeholder="HLA-A*02:01,HLA-B*07:02" value={newSample.mhc_alleles} onChange={e => setNewSample({...newSample, mhc_alleles: e.target.value})} />
+                </Field>
+              </div>
+              <button
+                onClick={addSample}
+                disabled={!newSample.patient_name || !newSample.run_name || !newSample.dataset || !newSample.file_prefix}
+                className="flex items-center gap-1.5 px-4 py-2 bg-blue-600 text-white rounded-md text-sm font-medium hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+              >
+                <Plus size={15} />Add Sample
+              </button>
+            </div>
+          )}
+
+          {mode === 'tsv' && (
+            <div className="mb-4">
+              <p className="text-xs text-gray-500 mb-1">Columns: patient_name, run_name, dataset, file_prefix, sequencing_method (optional), mhc_alleles (optional). Header row optional.</p>
+              <textarea
+                className="w-full h-32 px-3 py-2 border border-gray-300 rounded-md text-sm font-mono focus:outline-none focus:ring-2 focus:ring-blue-500"
+                placeholder={"Patient-01\tad-1234\tDataset-A\tgs://bucket/samples/patient01"}
+                value={tsvText}
+                onChange={e => setTsvText(e.target.value)}
+              />
+              {tsvError && <p className="mt-1 text-xs text-red-600 flex items-center gap-1"><AlertCircle size={12} />{tsvError}</p>}
+              <button
+                onClick={applyTsv}
+                disabled={!tsvText.trim()}
+                className="mt-2 px-4 py-2 bg-blue-600 text-white rounded-md text-sm font-medium hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+              >Apply</button>
+            </div>
+          )}
+
+          {/* Sample table */}
+          {samples.length > 0 ? (
+            <div>
+              <div className="flex items-center justify-between mb-2">
+                <h3 className="text-sm font-medium text-gray-700">{samples.length} sample{samples.length !== 1 ? 's' : ''}</h3>
+              </div>
+              <div className="overflow-x-auto rounded-lg border border-gray-200">
+                <table className="w-full text-xs">
+                  <thead>
+                    <tr className="bg-gray-50 border-b border-gray-200">
+                      <th className="px-3 py-2 text-left font-medium text-gray-600">Patient</th>
+                      <th className="px-3 py-2 text-left font-medium text-gray-600">Run Name</th>
+                      <th className="px-3 py-2 text-left font-medium text-gray-600">Type</th>
+                      <th className="px-3 py-2 text-left font-medium text-gray-600">Dataset</th>
+                      <th className="px-3 py-2 text-left font-medium text-gray-600">File Prefix</th>
+                      <th className="px-3 py-2 text-left font-medium text-gray-600">MHC Alleles</th>
+                      <th className="px-3 py-2"></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {samples.map((s, i) => (
+                      <tr key={s.id || i} className="border-b border-gray-100 last:border-0 hover:bg-gray-50">
+                        <td className="px-3 py-2 font-medium text-gray-800">{s.patient_name}</td>
+                        <td className="px-3 py-2 font-mono text-gray-700">{s.run_name}</td>
+                        <td className="px-3 py-2">{sampleTypeBadge(s.run_name)}</td>
+                        <td className="px-3 py-2 text-gray-600">{s.dataset}</td>
+                        <td className="px-3 py-2 font-mono text-gray-600 max-w-xs truncate">{s.file_prefix}</td>
+                        <td className="px-3 py-2 text-gray-600">{s.mhc_alleles || <span className="text-gray-300">—</span>}</td>
+                        <td className="px-3 py-2">
+                          <button
+                            onClick={() => onChange(samples.filter((_, j) => j !== i))}
+                            className="text-gray-400 hover:text-red-500 transition-colors"
+                            title="Remove sample"
+                          >
+                            <Trash2 size={14} />
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          ) : (
+            <div className="flex flex-col items-center justify-center py-10 text-gray-400 border-2 border-dashed border-gray-200 rounded-lg">
+              <CloudIcon size={32} className="mb-2 opacity-40" />
+              <p className="text-sm">No samples added yet. Use the form or paste a TSV above.</p>
+            </div>
+          )}
+        </div>
+      );
+    };
+
+    // ─── Step 3: Job Settings ──────────────────────────────────────────────────
+    const JobSettingsStep = ({ settings, onChange, errors, firstPatient }) => {
+      const handleMachineTypeChange = (val) => {
+        const mt = MACHINE_TYPES.find(m => m.value === val);
+        if (mt) {
+          onChange({ ...settings, machineType: val, maxCpu: mt.cpu, maxMem: mt.mem });
+        }
+      };
+
+      return (
+        <div>
+          <h2 className="text-lg font-semibold text-gray-900 mb-1">Job Settings</h2>
+          <p className="text-sm text-gray-500 mb-6">Configure how your RAFT workflow will run on GCP Batch.</p>
+
+          <Field label="RAFT Project Identifier" required error={errors.raftProjectId}
+            hint={firstPatient ? `Suggested from manifest: ${firstPatient}` : 'Short identifier for this analysis project'}>
+            <TextInput
+              placeholder={firstPatient || 'my-cancer-project'}
+              value={settings.raftProjectId}
+              onChange={e => onChange({ ...settings, raftProjectId: e.target.value })}
+            />
+          </Field>
+
+          <Field label="Workflow" required error={errors.workflow}>
+            <SelectInput value={settings.workflow} onChange={e => onChange({ ...settings, workflow: e.target.value })}>
+              {WORKFLOWS.map(w => <option key={w.value} value={w.value}>{w.label}</option>)}
+            </SelectInput>
+          </Field>
+
+          <Field label="Workflow Version" required error={errors.version}
+            hint="Use 'latest' or a specific tagged release">
+            <TextInput
+              placeholder="latest"
+              value={settings.version}
+              onChange={e => onChange({ ...settings, version: e.target.value })}
+            />
+          </Field>
+
+          <Field label="Species">
+            <SelectInput value={settings.species} onChange={e => onChange({ ...settings, species: e.target.value })}>
+              <option value="human">human</option>
+              <option value="mouse">mouse</option>
+            </SelectInput>
+          </Field>
+
+          <Field label="Machine Type" hint="Selecting a machine type auto-sets CPU and memory limits">
+            <SelectInput
+              value={settings.machineType}
+              onChange={e => handleMachineTypeChange(e.target.value)}
+            >
+              {MACHINE_TYPES.map(m => <option key={m.value} value={m.value}>{m.label}</option>)}
+            </SelectInput>
+          </Field>
+
+          <div className="grid grid-cols-2 gap-4">
+            <Field label="Max CPUs" hint="Auto-set from machine type">
+              <TextInput
+                type="number"
+                min={1}
+                value={settings.maxCpu}
+                onChange={e => onChange({ ...settings, maxCpu: parseInt(e.target.value) || settings.maxCpu })}
+              />
+            </Field>
+            <Field label="Max Memory (GB)" hint="Auto-set from machine type">
+              <TextInput
+                type="number"
+                min={1}
+                value={settings.maxMem}
+                onChange={e => onChange({ ...settings, maxMem: String(e.target.value) })}
+              />
+            </Field>
+          </div>
+
+          <Field label="Max Runtime (hours)" hint="Job will be cancelled if it exceeds this duration">
+            <TextInput
+              type="number"
+              min={1}
+              max={168}
+              value={settings.timeoutHours}
+              onChange={e => onChange({ ...settings, timeoutHours: parseInt(e.target.value) || settings.timeoutHours })}
+            />
+          </Field>
+        </div>
+      );
+    };
+
+    // ─── Step 4: Review & Launch ───────────────────────────────────────────────
+    const SummaryCard = ({ title, children }) => (
+      <div className="rounded-lg border border-gray-200 bg-white p-4 mb-3">
+        <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">{title}</h3>
+        {children}
+      </div>
+    );
+
+    const SummaryRow = ({ label, value }) => (
+      <div className="flex justify-between items-start py-1 border-b border-gray-50 last:border-0">
+        <span className="text-sm text-gray-500">{label}</span>
+        <span className="text-sm font-medium text-gray-800 text-right max-w-xs truncate">{value}</span>
+      </div>
+    );
+
+    const GoogleLogo = () => (
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="20" height="20">
+        <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
+        <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
+        <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/>
+        <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/>
+      </svg>
+    );
+
+    const LaunchStep = ({ cloudConfig, settings, samples, token, userEmail, onSignIn, jobStatus, jobId, jobError, onLaunch, onRetry }) => {
+      const workflow = WORKFLOWS.find(w => w.value === settings.workflow);
+      const machine = MACHINE_TYPES.find(m => m.value === settings.machineType);
+      const cloudRoot = normalizeBucket(cloudConfig.bucket);
+
+      return (
+        <div>
+          <h2 className="text-lg font-semibold text-gray-900 mb-1">Review & Launch</h2>
+          <p className="text-sm text-gray-500 mb-5">Confirm your configuration, sign in, and launch the job.</p>
+
+          <SummaryCard title="Cloud">
+            <SummaryRow label="Project" value={cloudConfig.projectId} />
+            <SummaryRow label="Cloud Root" value={cloudRoot} />
+            <SummaryRow label="Region" value={cloudConfig.region} />
+            {cloudConfig.runnerSA && <SummaryRow label="Service Account" value={cloudConfig.runnerSA} />}
+            <SummaryRow label="Runner Image" value={cloudConfig.runnerImage} />
+          </SummaryCard>
+
+          <SummaryCard title="Workflow">
+            <SummaryRow label="Workflow" value={workflow ? workflow.label : settings.workflow} />
+            <SummaryRow label="RAFT Project" value={settings.raftProjectId} />
+            <SummaryRow label="Version" value={settings.version} />
+            <SummaryRow label="Species" value={settings.species} />
+          </SummaryCard>
+
+          <SummaryCard title="Compute">
+            <SummaryRow label="Machine Type" value={machine ? machine.label : settings.machineType} />
+            <SummaryRow label="Max CPUs" value={String(settings.maxCpu)} />
+            <SummaryRow label="Max Memory" value={`${settings.maxMem} GB`} />
+            <SummaryRow label="Max Runtime" value={`${settings.timeoutHours} hours`} />
+          </SummaryCard>
+
+          <SummaryCard title={`Manifest (${samples.length} sample${samples.length !== 1 ? 's' : ''})`}>
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs">
+                <thead>
+                  <tr className="border-b border-gray-100">
+                    <th className="pb-1 text-left text-gray-500 font-medium">Patient</th>
+                    <th className="pb-1 text-left text-gray-500 font-medium">Run Name</th>
+                    <th className="pb-1 text-left text-gray-500 font-medium">Dataset</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {samples.map((s, i) => (
+                    <tr key={s.id || i} className="border-b border-gray-50 last:border-0">
+                      <td className="py-1 text-gray-800">{s.patient_name}</td>
+                      <td className="py-1 font-mono text-gray-700">{s.run_name}</td>
+                      <td className="py-1 text-gray-600">{s.dataset}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </SummaryCard>
+
+          {/* Auth + Launch */}
+          <div className="mt-6">
+            {!token ? (
+              <div className="flex flex-col items-center py-8">
+                <p className="text-sm text-gray-500 mb-4">Sign in with your Google account to upload the manifest and submit the job.</p>
+                <button
+                  onClick={onSignIn}
+                  className="flex items-center gap-3 px-5 py-3 bg-white border border-gray-300 rounded-lg shadow-sm hover:shadow-md text-sm font-medium text-gray-700 hover:bg-gray-50 transition-all"
+                >
+                  <GoogleLogo />
+                  Sign in with Google
+                </button>
+              </div>
+            ) : (
+              <div>
+                <div className="flex items-center gap-2 mb-4 text-sm text-gray-600">
+                  <UserIcon size={15} className="text-green-500" />
+                  <span>Signed in as <strong>{userEmail}</strong></span>
+                </div>
+
+                {jobStatus === 'idle' && (
+                  <button
+                    onClick={onLaunch}
+                    className="w-full flex items-center justify-center gap-2 px-6 py-3 bg-blue-600 text-white rounded-lg font-semibold text-sm hover:bg-blue-700 active:bg-blue-800 transition-colors shadow-sm"
+                  >
+                    <RocketIcon size={18} />
+                    Launch on GCP
+                  </button>
+                )}
+
+                {jobStatus === 'submitting' && (
+                  <div className="flex flex-col items-center gap-3 py-6">
+                    <svg className="animate-spin h-8 w-8 text-blue-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
+                    </svg>
+                    <p className="text-sm text-gray-600">Uploading manifest and submitting job to GCP Batch…</p>
+                  </div>
+                )}
+
+                {jobStatus === 'submitted' && (
+                  <div className="rounded-lg border border-green-200 bg-green-50 p-5">
+                    <div className="flex items-start gap-3">
+                      <Check size={20} className="text-green-600 mt-0.5 flex-shrink-0" />
+                      <div>
+                        <p className="text-sm font-semibold text-green-800 mb-1">Job submitted successfully!</p>
+                        <p className="text-xs text-green-700 font-mono mb-3 break-all">{jobId}</p>
+                        <a
+                          href={`https://console.cloud.google.com/batch/jobs?project=${cloudConfig.projectId}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex items-center gap-1.5 text-xs font-medium text-green-700 hover:text-green-900 underline"
+                        >
+                          View in GCP Console <ExternalLink size={12} />
+                        </a>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {jobStatus === 'error' && (
+                  <div className="rounded-lg border border-red-200 bg-red-50 p-4">
+                    <div className="flex items-start gap-2 mb-3">
+                      <AlertCircle size={16} className="text-red-500 mt-0.5 flex-shrink-0" />
+                      <p className="text-sm text-red-700">{jobError}</p>
+                    </div>
+                    <button
+                      onClick={onRetry}
+                      className="text-xs font-medium text-red-700 underline hover:text-red-900"
+                    >Retry</button>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        </div>
+      );
+    };
+
+    // ─── Main App ──────────────────────────────────────────────────────────────
+    const RaftCloudLauncher = () => {
+      const [step, setStep] = useState(1);
+      const [token, setToken] = useState('');
+      const [userEmail, setUserEmail] = useState('');
+      const [jobStatus, setJobStatus] = useState('idle');
+      const [jobId, setJobId] = useState('');
+      const [jobError, setJobError] = useState('');
+      const [cloudConfig, setCloudConfig] = useState({
+        projectId: '',
+        bucket: '',
+        region: 'us-central1',
+        runnerSA: '',
+        runnerImage: RAFT_RUNNER_IMAGE === 'YOUR_RUNNER_IMAGE_URI' ? '' : RAFT_RUNNER_IMAGE,
+        userEmail: '',
+      });
+      const [samples, setSamples] = useState([]);
+      const [settings, setSettings] = useState({
+        raftProjectId: '',
+        workflow: 'lens',
+        version: 'latest',
+        species: 'human',
+        machineType: 'n2-standard-16',
+        maxCpu: 16,
+        maxMem: '64',
+        timeoutHours: 24,
+      });
+      const [cloudErrors, setCloudErrors] = useState({});
+      const [settingsErrors, setSettingsErrors] = useState({});
+
+      const tokenClientRef = useRef(null);
+
+      const isUnconfigured = GOOGLE_OAUTH_CLIENT_ID === 'YOUR_GOOGLE_OAUTH_CLIENT_ID';
+
+      // Initialize Google OAuth
+      useEffect(() => {
+        const init = () => {
+          if (!window.google || isUnconfigured) return;
+          tokenClientRef.current = window.google.accounts.oauth2.initTokenClient({
+            client_id: GOOGLE_OAUTH_CLIENT_ID,
+            scope: 'https://www.googleapis.com/auth/cloud-platform email profile',
+            callback: async (resp) => {
+              if (resp.access_token) {
+                setToken(resp.access_token);
+                try {
+                  const userResp = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
+                    headers: { Authorization: `Bearer ${resp.access_token}` },
+                  });
+                  const info = await userResp.json();
+                  const email = info.email || '';
+                  setUserEmail(email);
+                  if (email) setCloudConfig(c => ({ ...c, userEmail: c.userEmail || email }));
+                } catch (_) {}
+              }
+            },
+          });
+        };
+        // Wait for GSI script to load
+        if (window.google) {
+          init();
+        } else {
+          window.__raftGsiCallback = init;
+          const script = document.querySelector('script[src*="accounts.google.com/gsi/client"]');
+          if (script) script.addEventListener('load', init);
+        }
+      }, []);
+
+      const handleSignIn = useCallback(() => {
+        if (tokenClientRef.current) {
+          tokenClientRef.current.requestAccessToken();
+        } else {
+          alert('Google sign-in is not initialized. Make sure GOOGLE_OAUTH_CLIENT_ID is configured.');
+        }
+      }, []);
+
+      // Sync workflow between manifest step and job settings step
+      const handleWorkflowChange = useCallback((wf) => {
+        setSettings(s => ({ ...s, workflow: wf }));
+      }, []);
+
+      // Validation
+      const validateCloud = () => {
+        const errs = {};
+        if (!cloudConfig.projectId.trim()) errs.projectId = 'GCP Project ID is required';
+        if (!cloudConfig.userEmail.trim()) errs.userEmail = 'Email is required';
+        if (!cloudConfig.bucket.trim()) errs.bucket = 'GCS bucket is required';
+        if (!cloudConfig.runnerImage.trim()) errs.runnerImage = 'Runner Docker image URI is required';
+        setCloudErrors(errs);
+        return Object.keys(errs).length === 0;
+      };
+
+      const validateSettings = () => {
+        const errs = {};
+        if (!settings.raftProjectId.trim()) errs.raftProjectId = 'RAFT Project Identifier is required';
+        if (!settings.workflow) errs.workflow = 'Workflow is required';
+        if (!settings.version.trim()) errs.version = 'Workflow version is required';
+        setSettingsErrors(errs);
+        return Object.keys(errs).length === 0;
+      };
+
+      const handleNext = () => {
+        if (step === 1) {
+          if (!validateCloud()) return;
+          setStep(2);
+        } else if (step === 2) {
+          if (samples.length === 0) return;
+          setStep(3);
+        } else if (step === 3) {
+          if (!validateSettings()) return;
+          setStep(4);
+        }
+      };
+
+      const handleBack = () => {
+        if (step > 1) setStep(s => s - 1);
+      };
+
+      // Build manifest TSV
+      const buildManifestTsv = () => {
+        const header = MANIFEST_HEADERS.join('\t');
+        const rows = samples.map(s => [
+          s.patient_name,
+          s.run_name,
+          s.dataset,
+          s.file_prefix,
+          s.sequencing_method || getSeqMethod(s.run_name),
+          s.mhc_alleles || '',
+        ].join('\t'));
+        return [header, ...rows].join('\n');
+      };
+
+      const handleLaunch = async () => {
+        setJobStatus('submitting');
+        setJobError('');
+        try {
+          const newJobId = generateJobId();
+          const bucketRoot = normalizeBucket(cloudConfig.bucket);
+          const bucketName = extractBucketName(cloudConfig.bucket);
+          const versionPrefix = `raft-${settings.workflow}-${settings.version}`;
+          const cloudRoot = `${bucketRoot}/${versionPrefix}`;
+          const manifestContent = buildManifestTsv();
+          const manifestFilename = `${newJobId}.manifest.tsv`;
+          const objectName = `${versionPrefix}/metadata/${manifestFilename}`;
+
+          await gcsUpload(token, bucketName, objectName, manifestContent);
+
+          const jobSpec = buildBatchJobSpec({
+            runnerImage: cloudConfig.runnerImage,
+            runnerSA: cloudConfig.runnerSA,
+            cloudRoot,
+            machineType: settings.machineType,
+            maxMem: String(settings.maxMem),
+            maxCpu: settings.maxCpu,
+            manifestFilename,
+            raftProjectId: settings.raftProjectId,
+            workflow: settings.workflow,
+            version: settings.version,
+            species: settings.species,
+            timeoutMinutes: settings.timeoutHours * 60,
+          });
+
+          const result = await submitBatchJob(token, cloudConfig.projectId, cloudConfig.region, newJobId, jobSpec);
+          setJobId(result.name || newJobId);
+          setJobStatus('submitted');
+        } catch (e) {
+          setJobError(e.message);
+          setJobStatus('error');
+        }
+      };
+
+      const handleRetry = () => {
+        setJobStatus('idle');
+        setJobError('');
+      };
+
+      const firstPatient = samples.length > 0 ? samples[0].patient_name : '';
+
+      const nextDisabled = step === 1 ? false
+        : step === 2 ? samples.length === 0
+        : step === 3 ? false
+        : false;
+
+      return (
+        <div className="min-h-screen bg-gray-50">
+          {/* Unconfigured provider banner */}
+          {isUnconfigured && (
+            <div className="bg-yellow-50 border-b border-yellow-200 px-4 py-3">
+              <div className="max-w-3xl mx-auto flex items-start gap-2">
+                <AlertCircle size={16} className="text-yellow-600 mt-0.5 flex-shrink-0" />
+                <p className="text-sm text-yellow-800">
+                  <strong>Provider setup required:</strong> This launcher is not yet configured. The <code className="bg-yellow-100 px-1 rounded">GOOGLE_OAUTH_CLIENT_ID</code> and <code className="bg-yellow-100 px-1 rounded">RAFT_RUNNER_IMAGE</code> constants at the top of the script must be replaced before use.
+                </p>
+              </div>
+            </div>
+          )}
+
+          {/* Header */}
+          <header className="bg-white border-b border-gray-200 px-4 py-4">
+            <div className="max-w-3xl mx-auto flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <CloudIcon size={22} className="text-blue-600" />
+                <h1 className="text-lg font-bold text-gray-900">RAFT Cloud Launcher</h1>
+              </div>
+              {userEmail && (
+                <div className="flex items-center gap-1.5 text-sm text-gray-500">
+                  <UserIcon size={14} className="text-green-500" />
+                  <span>{userEmail}</span>
+                </div>
+              )}
+            </div>
+          </header>
+
+          {/* Main content */}
+          <main className="max-w-3xl mx-auto px-4 py-8">
+            <StepIndicator currentStep={step} />
+
+            {/* Step card */}
+            <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-6 mb-6">
+              {step === 1 && (
+                <CloudSetupStep
+                  cloudConfig={cloudConfig}
+                  onChange={setCloudConfig}
+                  errors={cloudErrors}
+                />
+              )}
+              {step === 2 && (
+                <ManifestStep
+                  samples={samples}
+                  onChange={setSamples}
+                  selectedWorkflow={settings.workflow}
+                  onWorkflowChange={handleWorkflowChange}
+                />
+              )}
+              {step === 3 && (
+                <JobSettingsStep
+                  settings={settings}
+                  onChange={setSettings}
+                  errors={settingsErrors}
+                  firstPatient={firstPatient}
+                />
+              )}
+              {step === 4 && (
+                <LaunchStep
+                  cloudConfig={cloudConfig}
+                  settings={settings}
+                  samples={samples}
+                  token={token}
+                  userEmail={userEmail}
+                  onSignIn={handleSignIn}
+                  jobStatus={jobStatus}
+                  jobId={jobId}
+                  jobError={jobError}
+                  onLaunch={handleLaunch}
+                  onRetry={handleRetry}
+                />
+              )}
+            </div>
+
+            {/* Navigation */}
+            <div className="flex items-center justify-between">
+              <button
+                onClick={handleBack}
+                disabled={step === 1}
+                className="px-4 py-2 text-sm font-medium text-gray-600 border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+              >Back</button>
+
+              {step < 4 ? (
+                <button
+                  onClick={handleNext}
+                  disabled={nextDisabled}
+                  className="flex items-center gap-1.5 px-5 py-2 text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                >
+                  {step === 3 ? 'Review' : 'Next'}
+                  <ChevronRight size={15} />
+                </button>
+              ) : (
+                <div />
+              )}
+            </div>
+
+            {step === 2 && samples.length === 0 && (
+              <p className="text-center text-xs text-gray-400 mt-2">Add at least one sample to continue</p>
+            )}
+          </main>
+        </div>
+      );
+    };
+
+    ReactDOM.createRoot(document.getElementById('root')).render(<RaftCloudLauncher />);
+  </script>
+</body>
+</html>

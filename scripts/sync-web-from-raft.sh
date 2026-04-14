@@ -2,17 +2,21 @@
 
 set -euo pipefail
 
-SOURCE_DIR="${SOURCE_DIR:-$HOME/dev/raft/ui}"
+SOURCE_DIR="${SOURCE_DIR:-$HOME/dev/raft/src/raft/ui/static}"
 TARGET_DIR="${TARGET_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 
-FILES=(
-  "config-generator.html"
-  "raft-viewer.html"
-  "manifest-generator.html"
-)
+copy_from_raft() {
+  local src="$1"
+  local dest="$2"
+  cp "$SOURCE_DIR/$src" "$TARGET_DIR/$dest"
+}
 
-for file in "${FILES[@]}"; do
-  cp "$SOURCE_DIR/$file" "$TARGET_DIR/$file"
-done
+copy_from_raft "raft-config-generator.html" "config-generator.html"
+copy_from_raft "raft-manifest-generator.html" "manifest-generator.html"
+copy_from_raft "raft-cloud-launcher.html" "cloud-launcher.html"
+copy_from_raft "control-panel.html" "control-panel.html"
+copy_from_raft "raft-viewer.html" "raft-viewer.html"
+copy_from_raft "raft-viewer.html" "lens-viewer.html"
 
-printf 'Synced %s file(s) from %s to %s\n' "${#FILES[@]}" "$SOURCE_DIR" "$TARGET_DIR"
+printf 'Synced hosted UI files from %s to %s
+' "$SOURCE_DIR" "$TARGET_DIR"

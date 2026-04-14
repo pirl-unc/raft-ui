@@ -1,1 +1,921 @@
-/home/ubuntu/dev/raft/src/raft/ui/static/control-panel.html
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>RAFT Control Panel</title>
+  <style>
+    :root {
+      --bg: #f4efe5;
+      --panel: #fffaf2;
+      --panel-strong: #f9f2e5;
+      --ink: #1f2933;
+      --muted: #5f6b76;
+      --line: #d7cdbb;
+      --accent: #1c6b5f;
+      --accent-soft: #d9eee8;
+      --warning: #b45309;
+      --warning-soft: #fff1d6;
+      --danger: #b42318;
+      --danger-soft: #fde7e5;
+      --ok: #1f6b3b;
+      --ok-soft: #dff3e5;
+      --shadow: 0 10px 30px rgba(63, 49, 24, 0.08);
+    }
+
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "IBM Plex Sans", "Segoe UI", sans-serif;
+      color: var(--ink);
+      background:
+        radial-gradient(circle at top left, rgba(28,107,95,0.12), transparent 28%),
+        radial-gradient(circle at top right, rgba(180,83,9,0.10), transparent 26%),
+        linear-gradient(180deg, #f7f2e9 0%, var(--bg) 100%);
+      min-height: 100vh;
+    }
+
+    .shell {
+      max-width: 1480px;
+      margin: 0 auto;
+      padding: 28px;
+    }
+
+    .hero {
+      display: grid;
+      grid-template-columns: 1.4fr .8fr;
+      gap: 18px;
+      margin-bottom: 20px;
+    }
+
+    .panel {
+      background: rgba(255, 250, 242, 0.95);
+      border: 1px solid var(--line);
+      border-radius: 22px;
+      box-shadow: var(--shadow);
+      backdrop-filter: blur(10px);
+    }
+
+    .hero-copy {
+      padding: 26px 28px;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .hero-copy::after {
+      content: "";
+      position: absolute;
+      right: -80px;
+      top: -60px;
+      width: 240px;
+      height: 240px;
+      border-radius: 999px;
+      background: radial-gradient(circle, rgba(28,107,95,0.17), rgba(28,107,95,0));
+    }
+
+    h1 {
+      margin: 0 0 8px;
+      font-size: clamp(2rem, 4vw, 3.4rem);
+      line-height: 1.02;
+      letter-spacing: -0.05em;
+    }
+
+    .subtle {
+      color: var(--muted);
+      margin: 0;
+      max-width: 58rem;
+      line-height: 1.45;
+    }
+
+    .hero-stats {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 14px;
+      padding: 20px;
+    }
+
+    .stat {
+      background: var(--panel-strong);
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      padding: 14px 16px;
+    }
+
+    .stat .label {
+      display: block;
+      font-size: 0.82rem;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+    }
+
+    .stat .value {
+      display: block;
+      margin-top: 8px;
+      font-size: 1.5rem;
+      font-weight: 700;
+      letter-spacing: -0.04em;
+    }
+
+    .controls {
+      display: flex;
+      gap: 12px;
+      align-items: center;
+      flex-wrap: wrap;
+      padding: 16px 18px;
+      margin-bottom: 18px;
+    }
+
+    input, select, button {
+      font: inherit;
+      border-radius: 12px;
+      border: 1px solid var(--line);
+      background: #fffdf9;
+      color: var(--ink);
+      padding: 10px 12px;
+    }
+
+    input, select {
+      min-width: 160px;
+    }
+
+    button {
+      cursor: pointer;
+      background: var(--accent);
+      color: white;
+      border-color: transparent;
+      font-weight: 600;
+    }
+
+    button.secondary {
+      background: var(--panel-strong);
+      color: var(--ink);
+      border-color: var(--line);
+    }
+
+    .layout {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 18px;
+    }
+
+    .table-wrap {
+      overflow: auto;
+      padding: 10px 14px 14px;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.95rem;
+    }
+
+    thead th {
+      text-align: left;
+      font-size: 0.79rem;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--muted);
+      padding: 12px 10px;
+      position: sticky;
+      top: 0;
+      background: var(--panel);
+      cursor: pointer;
+    }
+
+    tbody td {
+      border-top: 1px solid rgba(215, 205, 187, 0.75);
+      padding: 12px 10px;
+      vertical-align: top;
+    }
+
+    tbody tr {
+      cursor: pointer;
+      transition: background 140ms ease, transform 140ms ease;
+    }
+
+    tbody tr:hover { background: rgba(28,107,95,0.05); }
+    tbody tr.selected { background: rgba(28,107,95,0.10); }
+
+    .badge-row, .chip-row, .tab-row, .grid-cards {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    .badge, .chip, .tab {
+      border-radius: 999px;
+      padding: 6px 10px;
+      font-size: 0.8rem;
+      border: 1px solid transparent;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .badge.status-completed, .chip.complete { background: var(--ok-soft); color: var(--ok); }
+    .badge.status-running { background: var(--accent-soft); color: var(--accent); }
+    .badge.status-failed, .chip.partial { background: var(--danger-soft); color: var(--danger); }
+    .badge.status-partially-failed { background: var(--warning-soft); color: var(--warning); }
+    .badge.status-configured, .badge.status-queued, .chip.not-run { background: #ece7dd; color: #5c5545; }
+    .badge.warning { background: var(--warning-soft); color: var(--warning); }
+    .chip { background: #f0ece4; color: #554c3e; }
+
+    .detail {
+      padding: 18px;
+      min-height: 760px;
+    }
+
+    .detail h2 {
+      margin: 0 0 6px;
+      font-size: 2rem;
+      letter-spacing: -0.04em;
+    }
+
+    .detail-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 12px;
+      margin: 16px 0 18px;
+    }
+
+    .mini-card, .metric-card {
+      background: var(--panel-strong);
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      padding: 14px;
+    }
+
+    .mini-card .label, .metric-card .label {
+      font-size: 0.78rem;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--muted);
+      display: block;
+    }
+
+    .mini-card .value, .metric-card .value {
+      display: block;
+      margin-top: 8px;
+      font-size: 1.15rem;
+      font-weight: 700;
+    }
+
+    .tab {
+      background: #efe7d9;
+      color: #534a3c;
+      cursor: pointer;
+    }
+
+    .tab.active {
+      background: var(--accent);
+      color: white;
+    }
+
+    .tab-panel {
+      margin-top: 16px;
+      display: none;
+    }
+
+    .tab-panel.active { display: block; }
+
+    .stack {
+      display: grid;
+      gap: 12px;
+    }
+
+    .row-between {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      align-items: flex-start;
+    }
+
+    .muted { color: var(--muted); }
+
+    .summary-list, .compact-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.92rem;
+    }
+
+    .summary-list th, .summary-list td, .compact-table th, .compact-table td {
+      padding: 9px 0;
+      border-top: 1px solid rgba(215,205,187,0.75);
+      text-align: left;
+      vertical-align: top;
+    }
+
+    .summary-list tr:first-child th,
+    .summary-list tr:first-child td,
+    .compact-table tr:first-child th,
+    .compact-table tr:first-child td { border-top: none; }
+
+    .tooltip {
+      border-bottom: 1px dotted var(--muted);
+      cursor: help;
+    }
+
+    .empty {
+      color: var(--muted);
+      padding: 18px;
+      background: #f3ede2;
+      border-radius: 16px;
+      border: 1px dashed var(--line);
+    }
+
+    .loading {
+      padding: 24px;
+      font-size: 1rem;
+      color: var(--muted);
+    }
+
+    .importer {
+      margin-bottom: 18px;
+      padding: 18px;
+    }
+
+    .importer.hidden {
+      display: none;
+    }
+
+    .import-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 14px;
+      margin-top: 12px;
+    }
+
+    .import-grid textarea {
+      width: 100%;
+      min-height: 128px;
+      resize: vertical;
+    }
+
+    @media (max-width: 1080px) {
+      .hero { grid-template-columns: 1fr; }
+      .detail-grid { grid-template-columns: 1fr; }
+      .import-grid { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <section class="hero">
+      <div class="panel hero-copy">
+        <h1>RAFT Control Panel</h1>
+        <p class="subtle">Cross-project operational reporting for RAFT. Scan project state, latest run failures, resource usage, manifest health, and workflow-specific LENS output summaries without opening raw files.</p>
+      </div>
+      <div class="panel hero-stats" id="heroStats">
+        <div class="stat"><span class="label">Projects</span><span class="value" id="statProjects">-</span></div>
+        <div class="stat"><span class="label">Running</span><span class="value" id="statRunning">-</span></div>
+        <div class="stat"><span class="label">Failed</span><span class="value" id="statFailed">-</span></div>
+        <div class="stat"><span class="label">⚠ Manifest Issues</span><span class="value" id="statIssues">-</span></div>
+      </div>
+    </section>
+
+    <section class="panel importer hidden" id="snapshotImporter">
+      <strong>Hosted Snapshot Mode</strong>
+      <p class="subtle">This page cannot reach a local RAFT API. Load a transferred control-panel snapshot instead.</p>
+      <div class="import-grid">
+        <div class="mini-card">
+          <span class="label">Bundle File</span>
+          <input id="bundleInput" type="file" accept=".json,application/json">
+          <p class="muted">Preferred for larger snapshots exported by `raft control-panel` in headless mode.</p>
+        </div>
+        <div class="mini-card">
+          <span class="label">Encoded Snapshot</span>
+          <textarea id="snapshotText" placeholder="Paste a RAFT1:control-panel:... snapshot string"></textarea>
+          <div class="chip-row">
+            <button id="loadSnapshotText" class="secondary" type="button">Load Pasted Snapshot</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel controls">
+      <input id="searchInput" type="search" placeholder="Search projects">
+      <select id="statusFilter">
+        <option value="">All statuses</option>
+      </select>
+      <select id="workflowFilter">
+        <option value="">All workflows</option>
+      </select>
+      <select id="issueFilter">
+        <option value="">Manifest: all</option>
+        <option value="with-issues">With issues</option>
+        <option value="without-issues">Without issues</option>
+      </select>
+      <button id="refreshButton">Refresh Snapshot</button>
+      <button id="clearButton" class="secondary">Clear Filters</button>
+      <span class="muted" id="generatedAt"></span>
+    </section>
+
+    <section class="layout">
+      <div class="panel">
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th data-sort="project_name">Project</th>
+                <th data-sort="workflow">Workflow</th>
+                <th data-sort="version">Version</th>
+                <th data-sort="status">Status</th>
+                <th data-sort="last_run_time">Last Run Time</th>
+                <th data-sort="total_duration_seconds">Total Duration</th>
+                <th data-sort="patient_count">Patients</th>
+                <th data-sort="total_storage_bytes">Total Storage</th>
+                <th>Failure Categories</th>
+              </tr>
+            </thead>
+            <tbody id="projectsBody">
+              <tr><td colspan="9" class="loading">Loading projects…</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="panel detail" id="detailPane">
+        <div class="empty">Select a project to view the latest run summary, failures, resources, manifest, and configuration details.</div>
+      </div>
+    </section>
+  </div>
+
+  <script>
+    const state = {
+      projects: [],
+      filtered: [],
+      selectedProjectId: new URLSearchParams(window.location.search).get('project_id') || '',
+      selectedDetail: null,
+      snapshotDetails: {},
+      sortKey: 'last_run_time',
+      sortDir: 'desc',
+      dataMode: 'api'
+    };
+
+    const CLIPBOARD_MAGIC = 'RAFT1:';
+
+    const statusClass = status => `status-${String(status || '').toLowerCase().replace(/\s+/g, '-')}`;
+    const fmt = {
+      time(value) {
+        if (!value) return '—';
+        try { return new Date(value).toLocaleString(); } catch { return value; }
+      },
+      value(value) { return value === null || value === undefined || value === '' ? '—' : value; }
+    };
+
+    function setHostedMode(message = '') {
+      state.dataMode = 'snapshot';
+      document.getElementById('snapshotImporter').classList.remove('hidden');
+      document.getElementById('refreshButton').disabled = true;
+      document.getElementById('refreshButton').textContent = 'Snapshot Mode';
+      if (message) {
+        document.getElementById('generatedAt').textContent = message;
+      }
+    }
+
+    function applySnapshot(payload) {
+      if (!payload || payload.format !== 'raft-control-panel-v1') {
+        throw new Error('Unsupported control-panel snapshot format');
+      }
+      state.dataMode = 'snapshot';
+      state.projects = payload.projects || [];
+      state.snapshotDetails = payload.details || {};
+      if (payload.selected_project_id) {
+        state.selectedProjectId = payload.selected_project_id;
+      }
+      document.getElementById('snapshotImporter').classList.remove('hidden');
+      document.getElementById('refreshButton').disabled = true;
+      document.getElementById('refreshButton').textContent = 'Snapshot Mode';
+      document.getElementById('generatedAt').textContent = payload.generated_at ? `Snapshot: ${fmt.time(payload.generated_at)}` : 'Snapshot loaded';
+      renderHero();
+      renderFilters();
+      applyFilters();
+      if (state.selectedProjectId && state.snapshotDetails[state.selectedProjectId]) {
+        state.selectedDetail = state.snapshotDetails[state.selectedProjectId];
+        renderDetail();
+      } else if (state.projects.length) {
+        state.selectedDetail = null;
+        renderDetail();
+      }
+    }
+
+    async function decodeSnapshotString(encoded) {
+      const value = String(encoded || '').trim();
+      if (!value.startsWith(CLIPBOARD_MAGIC)) {
+        throw new Error('Snapshot text must start with RAFT1:');
+      }
+      const remainder = value.slice(CLIPBOARD_MAGIC.length);
+      const firstColon = remainder.indexOf(':');
+      if (firstColon === -1) {
+        throw new Error('Invalid encoded snapshot');
+      }
+      const dataType = remainder.slice(0, firstColon);
+      const encodedData = remainder.slice(firstColon + 1);
+      if (dataType !== 'control-panel') {
+        throw new Error(`Expected control-panel snapshot, received ${dataType}`);
+      }
+      const binary = atob(encodedData);
+      const bytes = Uint8Array.from(binary, char => char.charCodeAt(0));
+      const decompressed = new TextDecoder().decode(await inflateGzip(bytes));
+      return JSON.parse(decompressed);
+    }
+
+    function inflateGzip(bytes) {
+      if ('DecompressionStream' in window) {
+        const ds = new DecompressionStream('gzip');
+        const stream = new Blob([bytes]).stream().pipeThrough(ds);
+        return streamToArrayBuffer(stream);
+      }
+      throw new Error('This browser cannot decode pasted gzip snapshots. Use the bundle file instead.');
+    }
+
+    async function streamToArrayBuffer(stream) {
+      return await new Response(stream).arrayBuffer();
+    }
+
+    async function loadProjects() {
+      try {
+        const response = await fetch('/api/control-panel/projects');
+        if (!response.ok) throw new Error('Failed to load project list');
+        const payload = await response.json();
+        state.projects = payload.projects || [];
+        state.snapshotDetails = {};
+        state.dataMode = 'api';
+        document.getElementById('generatedAt').textContent = payload.generated_at ? `Snapshot: ${fmt.time(payload.generated_at)}` : '';
+        renderHero();
+        renderFilters();
+        applyFilters();
+        if (state.selectedProjectId) {
+          const exists = state.projects.some(project => project.project_id === state.selectedProjectId);
+          if (exists) await loadProjectDetail(state.selectedProjectId);
+        }
+      } catch (error) {
+        setHostedMode('Hosted page detected. Load a transferred snapshot.');
+        throw error;
+      }
+    }
+
+    async function loadProjectDetail(projectId) {
+      state.selectedProjectId = projectId;
+      if (state.dataMode === 'snapshot') {
+        const detail = state.snapshotDetails[projectId];
+        if (!detail || detail.error) {
+          throw new Error(detail?.error || 'Snapshot detail not available for this project');
+        }
+        state.selectedDetail = detail;
+      } else {
+        const response = await fetch(`/api/control-panel/projects/${encodeURIComponent(projectId)}`);
+        if (!response.ok) throw new Error('Failed to load project detail');
+        state.selectedDetail = await response.json();
+      }
+      renderTable();
+      renderDetail();
+    }
+
+    function renderHero() {
+      const projects = state.projects;
+      document.getElementById('statProjects').textContent = projects.length;
+      document.getElementById('statRunning').textContent = projects.filter(p => p.status === 'Running').length;
+      document.getElementById('statFailed').textContent = projects.filter(p => p.status === 'Failed' || p.status === 'Partially Failed').length;
+      document.getElementById('statIssues').textContent = projects.filter(p => p.has_manifest_issues).length;
+    }
+
+    function renderFilters() {
+      const workflows = [...new Set(state.projects.map(project => project.workflow).filter(Boolean))].sort();
+      const statuses = [...new Set(state.projects.map(project => project.status).filter(Boolean))].sort();
+      const workflowFilter = document.getElementById('workflowFilter');
+      const statusFilter = document.getElementById('statusFilter');
+      workflowFilter.innerHTML = '<option value="">All workflows</option>' + workflows.map(value => `<option value="${value}">${value}</option>`).join('');
+      statusFilter.innerHTML = '<option value="">All statuses</option>' + statuses.map(value => `<option value="${value}">${value}</option>`).join('');
+    }
+
+    function applyFilters() {
+      const search = document.getElementById('searchInput').value.trim().toLowerCase();
+      const workflow = document.getElementById('workflowFilter').value;
+      const status = document.getElementById('statusFilter').value;
+      const issueFilter = document.getElementById('issueFilter').value;
+
+      state.filtered = state.projects.filter(project => {
+        const matchesSearch = !search || [project.project_name, project.workflow, project.version].join(' ').toLowerCase().includes(search);
+        const matchesWorkflow = !workflow || project.workflow === workflow;
+        const matchesStatus = !status || project.status === status;
+        const matchesIssues = !issueFilter
+          || (issueFilter === 'with-issues' && project.has_manifest_issues)
+          || (issueFilter === 'without-issues' && !project.has_manifest_issues);
+        return matchesSearch && matchesWorkflow && matchesStatus && matchesIssues;
+      });
+
+      state.filtered.sort((a, b) => {
+        const av = a[state.sortKey];
+        const bv = b[state.sortKey];
+        if (av === bv) return 0;
+        if (av === null || av === undefined) return 1;
+        if (bv === null || bv === undefined) return -1;
+        const dir = state.sortDir === 'asc' ? 1 : -1;
+        return av > bv ? dir : -dir;
+      });
+
+      renderTable();
+    }
+
+    function renderTable() {
+      const body = document.getElementById('projectsBody');
+      if (!state.filtered.length) {
+        body.innerHTML = '<tr><td colspan="9" class="loading">No projects matched the current filters.</td></tr>';
+        return;
+      }
+      body.innerHTML = state.filtered.map(project => {
+        const categories = (project.failure_categories || []).slice(0, 3).map(item => `<span class="chip">${item.name} (${item.count})</span>`).join('');
+        const issues = project.has_manifest_issues ? '<span class="badge warning">⚠ Manifest Issues</span>' : '';
+        return `
+          <tr data-project-id="${project.project_id}" class="${project.project_id === state.selectedProjectId ? 'selected' : ''}">
+            <td>
+              <strong>${project.project_name}</strong>
+              <div class="badge-row">${issues}</div>
+            </td>
+            <td>${fmt.value(project.workflow)}</td>
+            <td>${fmt.value(project.version)}</td>
+            <td><span class="badge ${statusClass(project.status)}">${fmt.value(project.status)}</span></td>
+            <td>${fmt.time(project.last_run_time)}</td>
+            <td>${fmt.value(project.total_duration_display)}</td>
+            <td>${fmt.value(project.patient_count)}</td>
+            <td>${fmt.value(project.total_storage_display)}</td>
+            <td><div class="chip-row">${categories || '<span class="muted">—</span>'}</div></td>
+          </tr>`;
+      }).join('');
+
+      body.querySelectorAll('tr[data-project-id]').forEach(row => {
+        row.addEventListener('click', () => loadProjectDetail(row.dataset.projectId).catch(showError));
+      });
+    }
+
+    function renderDetail() {
+      const root = document.getElementById('detailPane');
+      const detail = state.selectedDetail;
+      if (!detail) {
+        root.innerHTML = '<div class="empty">Select a project to inspect its latest run.</div>';
+        return;
+      }
+
+      const project = detail.project;
+      const overviewCards = (detail.overview.summary_cards || []).map(card => `
+        <div class="mini-card">
+          <span class="label">${card.title}</span>
+          <span class="value">${fmt.value(card.value)}</span>
+        </div>`).join('');
+
+      const failureRows = (detail.failures.categories || []).map(category => `
+        <div class="mini-card">
+          <div class="row-between">
+            <div>
+              <span class="label">${category.name}</span>
+              <span class="value">${category.count} match(es)</span>
+            </div>
+          </div>
+          ${category.examples && category.examples.length ? `<table class="summary-list">${category.examples.map(example => `<tr><td class="muted">${escapeHtml(example)}</td></tr>`).join('')}</table>` : ''}
+        </div>`).join('') || '<div class="empty">No categorized failures were found for the latest run.</div>';
+
+      const processRows = (detail.resources.processes || []).slice(0, 12).map(process => `
+        <tr>
+          <td>${process.process}</td>
+          <td>${fmt.value(process.task_count)}</td>
+          <td>${fmt.value(process.failed_task_count)}</td>
+          <td><span class="tooltip" title="Raw trace metric: realtime/duration">${fmt.value(process.elapsed_runtime_display)}</span></td>
+          <td><span class="tooltip" title="Raw trace metric: cpu or derived CPU time">${fmt.value(process.cpu_time_display)}</span></td>
+          <td><span class="tooltip" title="Raw trace metric: rss / peak_rss">${fmt.value(process.peak_memory_display)}</span></td>
+        </tr>`).join('') || '<tr><td colspan="6" class="muted">No trace-derived process summaries available.</td></tr>';
+
+      const patientRows = (detail.resources.patients || []).map(patient => `
+        <tr>
+          <td>${patient.patient_id}</td>
+          <td>${fmt.value(patient.patient_specific_runtime_display)}</td>
+          <td>${fmt.value(patient.shared_runtime_display)}</td>
+          <td>${fmt.value(patient.combined_runtime_display)}</td>
+          <td>${fmt.value(patient.peak_memory_display)}</td>
+        </tr>`).join('') || '<tr><td colspan="5" class="muted">No patient-level trace attribution available.</td></tr>';
+
+      const manifestWarnings = (detail.manifest.warnings || []).map(warning => `<tr><td>${escapeHtml(warning)}</td></tr>`).join('') || '<tr><td class="muted">No manifest issues detected.</td></tr>';
+      const manifestPatients = (detail.manifest.patient_details || []).map(patient => `
+        <tr>
+          <td>${patient.patient_id}</td>
+          <td>${patient.sample_count}</td>
+          <td>${patient.group_count}</td>
+          <td>${patient.groups.join(', ') || 'default'}</td>
+        </tr>`).join('') || '<tr><td colspan="4" class="muted">No manifest details available.</td></tr>';
+
+      root.innerHTML = `
+        <div class="row-between">
+          <div>
+            <h2>${project.project_name}</h2>
+            <p class="subtle">${fmt.value(project.workflow)} / ${fmt.value(project.version)} · latest trace: ${fmt.value(project.latest_trace)}</p>
+          </div>
+          <div class="badge-row">
+            <span class="badge ${statusClass(project.status)}">${fmt.value(project.status)}</span>
+            ${project.has_manifest_issues ? '<span class="badge warning">⚠ Manifest Issues</span>' : ''}
+          </div>
+        </div>
+
+        <div class="detail-grid">${overviewCards}</div>
+
+        <div class="tab-row">
+          <span class="tab active" data-tab="overview">Overview</span>
+          <span class="tab" data-tab="outputs">Outputs</span>
+          <span class="tab" data-tab="failures">Failures</span>
+          <span class="tab" data-tab="resources">Resources</span>
+          <span class="tab" data-tab="manifest">Manifest</span>
+          <span class="tab" data-tab="config">Config</span>
+        </div>
+
+        <section class="tab-panel active" data-panel="overview">
+          <div class="stack">
+            <div class="mini-card">
+              <div class="row-between">
+                <div>
+                  <span class="label">Last run time</span>
+                  <span class="value">${fmt.time(project.last_run_time)}</span>
+                </div>
+                <div>
+                  <span class="label">Failure categories</span>
+                  <div class="chip-row">${(project.failure_categories || []).map(item => `<span class="chip">${item.name} (${item.count})</span>`).join('') || '<span class="muted">No failure categories</span>'}</div>
+                </div>
+              </div>
+            </div>
+            <div class="mini-card">
+              <div class="detail-grid" style="margin:0">
+                <div>
+                  <span class="label">Total duration</span>
+                  <span class="value">${fmt.value(project.total_duration_display)}</span>
+                </div>
+                <div>
+                  <span class="label">Average duration per patient</span>
+                  <span class="value">${fmt.value(project.average_duration_display)}</span>
+                </div>
+                <div>
+                  <span class="label">Total storage</span>
+                  <span class="value">${fmt.value(project.total_storage_display)}</span>
+                </div>
+                <div>
+                  <span class="label">Average storage per patient</span>
+                  <span class="value">${fmt.value(project.average_storage_display)}</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section class="tab-panel" data-panel="outputs">
+          <div class="stack">
+            <div class="mini-card">
+              <span class="label">Total output storage</span>
+              <span class="value">${fmt.value(detail.outputs.storage_display)}</span>
+            </div>
+            <div class="mini-card">
+              <span class="label">Average storage per patient</span>
+              <span class="value">${fmt.value(detail.outputs.average_storage_display)}</span>
+            </div>
+            <table class="compact-table">
+              <tr><th>Patient</th><th>Approximate storage</th></tr>
+              ${(detail.outputs.patient_storage || []).map(item => `<tr><td>${item.patient_id}</td><td>${fmt.value(item.approx_storage_display)}</td></tr>`).join('') || '<tr><td colspan="2" class="muted">No patient-level storage summaries available.</td></tr>'}
+            </table>
+          </div>
+        </section>
+
+        <section class="tab-panel" data-panel="failures"><div class="stack">${failureRows}</div></section>
+
+        <section class="tab-panel" data-panel="resources">
+          <div class="stack">
+            <div class="detail-grid">
+              <div class="mini-card"><span class="label">Elapsed runtime</span><span class="value"><span class="tooltip" title="Raw trace metric: realtime / duration">${fmt.value(detail.resources.elapsed_runtime_display)}</span></span></div>
+              <div class="mini-card"><span class="label">CPU time consumed</span><span class="value"><span class="tooltip" title="Raw trace metric: cpu / derived CPU time">${fmt.value(detail.resources.cpu_time_display)}</span></span></div>
+              <div class="mini-card"><span class="label">Peak memory used</span><span class="value"><span class="tooltip" title="Raw trace metric: rss / peak_rss">${fmt.value(detail.resources.peak_memory_display)}</span></span></div>
+              <div class="mini-card"><span class="label">Failed tasks</span><span class="value">${fmt.value(detail.resources.failed_task_count)}</span></div>
+            </div>
+            <div class="mini-card">
+              <span class="label">Patient runtime summary</span>
+              <table class="compact-table">
+                <tr><th>Patient</th><th>Patient-specific</th><th>Shared</th><th>Combined</th><th>Peak memory</th></tr>
+                ${patientRows}
+              </table>
+            </div>
+            <div class="mini-card">
+              <span class="label">Process summary</span>
+              <table class="compact-table">
+                <tr><th>Process</th><th>Tasks</th><th>Failed</th><th>Runtime</th><th>CPU time</th><th>Peak memory</th></tr>
+                ${processRows}
+              </table>
+            </div>
+          </div>
+        </section>
+
+        <section class="tab-panel" data-panel="manifest">
+          <div class="stack">
+            <div class="detail-grid">
+              <div class="mini-card"><span class="label">Patients</span><span class="value">${fmt.value(detail.manifest.patients.length)}</span></div>
+              <div class="mini-card"><span class="label">Samples</span><span class="value">${fmt.value(detail.manifest.sample_count)}</span></div>
+              <div class="mini-card"><span class="label">Groups</span><span class="value">${fmt.value(detail.manifest.group_count)}</span></div>
+              <div class="mini-card"><span class="label">Issue count</span><span class="value">${fmt.value(detail.manifest.issue_count)}</span></div>
+            </div>
+            <div class="mini-card">
+              <span class="label">Manifest warnings</span>
+              <table class="summary-list">${manifestWarnings}</table>
+            </div>
+            <div class="mini-card">
+              <span class="label">Patient and group summary</span>
+              <table class="compact-table">
+                <tr><th>Patient</th><th>Samples</th><th>Groups</th><th>Group names</th></tr>
+                ${manifestPatients}
+              </table>
+            </div>
+          </div>
+        </section>
+
+        <section class="tab-panel" data-panel="config">
+          <div class="stack">
+            <div class="mini-card"><span class="label">Last run command</span><span class="value" style="font-size:0.95rem; line-height:1.5">${escapeHtml(detail.config.last_run_command || 'No recorded run command')}</span></div>
+            <div class="detail-grid">
+              <div class="mini-card"><span class="label">Workflow</span><span class="value">${fmt.value(detail.config.workflow)}</span></div>
+              <div class="mini-card"><span class="label">Version</span><span class="value">${fmt.value(detail.config.version)}</span></div>
+              <div class="mini-card"><span class="label">Latest user config</span><span class="value">${fmt.value(detail.config.latest_user_config)}</span></div>
+              <div class="mini-card"><span class="label">Project workflow files</span><span class="value">${detail.config.has_main_workflow ? 'Present' : 'Missing'} / ${detail.config.has_nextflow_config ? 'Config present' : 'Config missing'}</span></div>
+            </div>
+          </div>
+        </section>`;
+
+      root.querySelectorAll('.tab').forEach(tab => {
+        tab.addEventListener('click', () => {
+          root.querySelectorAll('.tab').forEach(node => node.classList.remove('active'));
+          root.querySelectorAll('.tab-panel').forEach(node => node.classList.remove('active'));
+          tab.classList.add('active');
+          root.querySelector(`[data-panel="${tab.dataset.tab}"]`).classList.add('active');
+        });
+      });
+    }
+
+    function escapeHtml(value) {
+      return String(value ?? '')
+        .replaceAll('&', '&amp;')
+        .replaceAll('<', '&lt;')
+        .replaceAll('>', '&gt;')
+        .replaceAll('"', '&quot;')
+        .replaceAll("'", '&#039;');
+    }
+
+    function showError(error) {
+      console.error(error);
+      document.getElementById('detailPane').innerHTML = `<div class="empty">Failed to load data: ${escapeHtml(error.message || String(error))}</div>`;
+    }
+
+    document.querySelectorAll('th[data-sort]').forEach(header => {
+      header.addEventListener('click', () => {
+        const key = header.dataset.sort;
+        if (state.sortKey === key) {
+          state.sortDir = state.sortDir === 'asc' ? 'desc' : 'asc';
+        } else {
+          state.sortKey = key;
+          state.sortDir = key === 'project_name' ? 'asc' : 'desc';
+        }
+        applyFilters();
+      });
+    });
+
+    document.getElementById('searchInput').addEventListener('input', applyFilters);
+    document.getElementById('workflowFilter').addEventListener('change', applyFilters);
+    document.getElementById('statusFilter').addEventListener('change', applyFilters);
+    document.getElementById('issueFilter').addEventListener('change', applyFilters);
+    document.getElementById('refreshButton').addEventListener('click', () => {
+      if (state.dataMode === 'snapshot') return;
+      loadProjects().catch(showError);
+    });
+    document.getElementById('clearButton').addEventListener('click', () => {
+      document.getElementById('searchInput').value = '';
+      document.getElementById('workflowFilter').value = '';
+      document.getElementById('statusFilter').value = '';
+      document.getElementById('issueFilter').value = '';
+      applyFilters();
+    });
+
+    document.getElementById('bundleInput').addEventListener('change', async event => {
+      const file = event.target.files && event.target.files[0];
+      if (!file) return;
+      try {
+        const payload = JSON.parse(await file.text());
+        applySnapshot(payload);
+      } catch (error) {
+        showError(error);
+      }
+    });
+
+    document.getElementById('loadSnapshotText').addEventListener('click', async () => {
+      try {
+        const payload = await decodeSnapshotString(document.getElementById('snapshotText').value);
+        applySnapshot(payload);
+      } catch (error) {
+        showError(error);
+      }
+    });
+
+    loadProjects().catch(() => {});
+  </script>
+</body>
+</html>
