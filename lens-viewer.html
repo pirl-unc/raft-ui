@@ -1176,6 +1176,7 @@ HLA-C*08:02	EICHTVYYQ	Indel	NPM1	11	94024257	94024259	TA	GGGT	indel	TA>GGGT	p.M1
       const [mobileView, setMobileView] = useState('visualizations'); // 'visualizations' or 'pmhcs'
       const [patientTab, setPatientTab] = useState('report');
       const [reportTemplate, setReportTemplate] = useState(DEFAULT_REPORT_TEMPLATE);
+      const [reportFiles, setReportFiles] = useState({});
       const [qcData, setQcData] = useState({}); // QC data organized by patient/sample
       const [cohortQcData, setCohortQcData] = useState(null); // Cohort-level QC summary
       const [manifestData, setManifestData] = useState(null); // Manifest group data
@@ -1240,12 +1241,43 @@ HLA-C*08:02	EICHTVYYQ	Indel	NPM1	11	94024257	94024259	TA	GGGT	indel	TA>GGGT	p.M1
         });
       };
 
+      const matchesAnyPattern = (filename, patterns = []) => {
+        if (!Array.isArray(patterns) || patterns.length === 0) return true;
+        const basename = filename.split('/').pop();
+        return patterns.some(pattern => {
+          const escaped = String(pattern).replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*').replace(/\?/g, '.');
+          const regex = new RegExp(`^${escaped}$`, 'i');
+          return regex.test(basename) || regex.test(filename);
+        });
+      };
+
+      const parseDelimitedRows = (filename, content) => {
+        const lines = String(content || '').split(/\r?\n/).filter(line => line.trim() !== '');
+        if (lines.length < 2) return [];
+        const delimiter = lines[0].includes('\t') ? '\t' : ',';
+        const headers = lines[0].split(delimiter);
+        return lines.slice(1).map((line, idx) => {
+          const values = line.split(delimiter);
+          const row = { _source_file: filename, _row_index: idx + 1 };
+          headers.forEach((header, colIdx) => { row[header] = values[colIdx] ?? ''; });
+          return row;
+        });
+      };
+
       const loadFilesMap = (filesMap, manifestOverride = null) => {
         let parsed = {};
+        const nextReportFiles = {};
         const activeManifest = manifestOverride || manifestData;
         for (const [filename, content] of Object.entries(filesMap)) {
+          nextReportFiles[filename] = {
+            name: filename,
+            basename: filename.split('/').pop(),
+            content,
+            rows: parseDelimitedRows(filename, content)
+          };
           parsed = parseFileContent(filename, content, parsed, activeManifest);
         }
+        setReportFiles(nextReportFiles);
         setPatients({...parsed});
         const firstId = Object.keys(parsed).sort()[0];
         if (firstId) {
@@ -1326,13 +1358,18 @@ HLA-C*08:02	EICHTVYYQ	Indel	NPM1	11	94024257	94024259	TA	GGGT	indel	TA>GGGT	p.M1
           if (!name.match(/\.(tsv|txt)$/i)) return;
           filesMap[name] = textDecoder.decode(content);
         });
-        if (Object.keys(filesMap).length === 0) {
-          throw new Error('Bundle did not contain any TSV/TXT report files.');
-        }
         if (bundleManifestData) setManifestData(bundleManifestData);
         if (bundleQcData) setQcData(bundleQcData);
         if (bundleReportTemplate) setReportTemplate(normalizeReportTemplate(bundleReportTemplate));
-        loadFilesMap(filesMap, bundleManifestData);
+        if (Object.keys(filesMap).length > 0) {
+          loadFilesMap(filesMap, bundleManifestData);
+        } else {
+          setReportFiles({});
+          setPatients({});
+        }
+        if (!bundleManifestData && !bundleQcData && !bundleReportTemplate && Object.keys(filesMap).length === 0) {
+          throw new Error('Bundle did not contain report files, QC data, or a report UI template.');
+        }
       };
 
       const handleBundleUpload = (e) => {
@@ -1911,6 +1948,15 @@ HLA-C*08:02	EICHTVYYQ	Indel	NPM1	11	94024257	94024259	TA	GGGT	indel	TA>GGGT	p.M1
         return patient.data;
       };
 
+      const getSectionRows = (section) => {
+        const files = Object.values(reportFiles).filter(file => matchesAnyPattern(file.name, section?.patterns));
+        const rows = files.flatMap(file => file.rows || []);
+        if (!selectedPatient || rows.length === 0) return rows;
+        const patientKeys = section?.patient_keys || ['Patient_Name', 'patient', 'patient_id', 'Patient', 'sample_id'];
+        const filteredRows = rows.filter(row => patientKeys.some(key => String(row[key] || '') === String(selectedPatient)));
+        return filteredRows.length > 0 ? filteredRows : rows;
+      };
+
       // Current patient data (filtered and sorted)
       const currentPatientData = useMemo(() => {
         let data = getPatientDataSource();
@@ -1953,6 +1999,21 @@ HLA-C*08:02	EICHTVYYQ	Indel	NPM1	11	94024257	94024259	TA	GGGT	indel	TA>GGGT	p.M1
         return allData;
       }, [patients]);
 
+      const viewerPatients = useMemo(() => {
+        if (Object.keys(patients).length > 0) return patients;
+        const qcPatientIds = Object.keys(qcData?.summaries || qcData?.patients || {}).sort();
+        return Object.fromEntries(qcPatientIds.map(id => [id, {
+          id,
+          isMultiGroup: false,
+          groups: ['default'],
+          files: [],
+          data: [],
+          alleles: new Set(),
+          alleleSupport: {},
+          antigenSources: new Set()
+        }]));
+      }, [patients, qcData]);
+
       const reportSections = useMemo(() => {
         return normalizeReportTemplate(reportTemplate).sections;
       }, [reportTemplate]);
@@ -1968,11 +2029,24 @@ HLA-C*08:02	EICHTVYYQ	Indel	NPM1	11	94024257	94024259	TA	GGGT	indel	TA>GGGT	p.M1
         || activeSection?.source === 'qc'
         || activeSection?.id === 'qc'
         || activeSection?.id === 'quality_control';
+      const activeRenderer = activeSection?.renderer || 'table';
+      const isLensSection = activeRenderer === 'lens_antigen_report';
 
       const activeSectionControls = activeSection?.controls || {};
-      const defaultReportSectionId = (reportSections.find(section =>
-        !(section.renderer === 'qc_summary' || section.source === 'qc' || section.id === 'qc' || section.id === 'quality_control')
-      ) || reportSections[0] || DEFAULT_REPORT_TEMPLATE.sections[0]).id;
+      const defaultReportSectionId = (
+        reportSections.find(section => section.default)
+        || reportSections.find(section =>
+          !(section.renderer === 'qc_summary' || section.source === 'qc' || section.id === 'qc' || section.id === 'quality_control')
+        )
+        || reportSections[0]
+        || DEFAULT_REPORT_TEMPLATE.sections[0]
+      ).id;
+      const activeGenericRows = useMemo(() => getSectionRows(activeSection), [activeSection, reportFiles, selectedPatient]);
+
+      useEffect(() => {
+        if (selectedPatient || Object.keys(viewerPatients).length === 0) return;
+        setSelectedPatient(Object.keys(viewerPatients).sort()[0]);
+      }, [viewerPatients, selectedPatient]);
 
       const toggleAllele = (allele) => {
         const newSet = new Set(selectedAlleles);
@@ -2009,10 +2083,10 @@ HLA-C*08:02	EICHTVYYQ	Indel	NPM1	11	94024257	94024259	TA	GGGT	indel	TA>GGGT	p.M1
       };
 
       // Upload screen
-      if (Object.keys(patients).length === 0) {
+      if (Object.keys(viewerPatients).length === 0 && Object.keys(reportFiles).length === 0) {
         return (
           <div className="min-h-screen bg-gray-50 p-4 md:p-6">
-            <Header />
+            <Header reportTemplate={reportTemplate} />
             <div className="max-w-3xl mx-auto mt-12">
               <div className="bg-white rounded-lg shadow-md p-8 text-center border-2 border-dashed border-gray-300">
                 {isPreloading ? (
@@ -2038,10 +2112,10 @@ HLA-C*08:02	EICHTVYYQ	Indel	NPM1	11	94024257	94024259	TA	GGGT	indel	TA>GGGT	p.M1
                     <div className="mx-auto mb-6 w-16 h-16 flex items-center justify-center">
                       <Icon name="upload" size={48} color="#6b7280" />
                     </div>
-                    <h2 className="text-2xl font-bold text-gray-800 mb-2">Upload LENS Reports</h2>
+                    <h2 className="text-2xl font-bold text-gray-800 mb-2">Upload RAFT Report Data</h2>
                     <p className="text-gray-600 mb-6 leading-relaxed">
-                      Select one or more TSV report files to begin analysis.<br />
-                      Each file will be parsed and organized by patient identifier.
+                      Select TSV/TXT report files or a RAFT report bundle to begin analysis.<br />
+                      QC-only bundles are supported even when no report table is available.
                     </p>
                     <div className="flex gap-4 justify-center flex-wrap">
                       <label className="inline-block px-6 py-3 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition cursor-pointer text-sm font-medium">
@@ -2124,7 +2198,7 @@ HLA-C*08:02	EICHTVYYQ	Indel	NPM1	11	94024257	94024259	TA	GGGT	indel	TA>GGGT	p.M1
           <div className="flex flex-1 min-h-0">
             {/* Sidebar */}
             <Sidebar
-              patients={patients}
+              patients={viewerPatients}
               selectedPatient={selectedPatient}
               setSelectedPatient={setSelectedPatient}
               setSelectedAlleles={setSelectedAlleles}
@@ -2156,7 +2230,7 @@ HLA-C*08:02	EICHTVYYQ	Indel	NPM1	11	94024257	94024259	TA	GGGT	indel	TA>GGGT	p.M1
                 </div>
               ) : viewMode === 'cohort-qc' ? (
                 <div className="flex-1 min-h-0 overflow-y-auto p-4 md:p-6">
-                  <CohortQCView qcData={qcData} patients={patients} />
+                  <CohortQCView qcData={qcData} patients={viewerPatients} />
                 </div>
               ) : (
                 <div className="flex flex-col flex-1 min-h-0 overflow-y-auto p-4 md:p-6">
@@ -2183,7 +2257,14 @@ HLA-C*08:02	EICHTVYYQ	Indel	NPM1	11	94024257	94024259	TA	GGGT	indel	TA>GGGT	p.M1
                     </div>
                   </div>
 
-                  {!isQcSection ? (
+                  {isQcSection ? (
+                  <div>
+                    <QCSummaryDashboard
+                      patient={selectedPatient}
+                      qcData={qcData}
+                    />
+                  </div>
+                  ) : isLensSection ? (
                   <React.Fragment>
                   {/* Group sub-tabs for multi-group patients (manifest or QC-detected groups) */}
                   {patients[selectedPatient]?.isMultiGroup && (
@@ -2335,14 +2416,15 @@ HLA-C*08:02	EICHTVYYQ	Indel	NPM1	11	94024257	94024259	TA	GGGT	indel	TA>GGGT	p.M1
                   </React.Fragment>
                   )}
                   </React.Fragment>
+                  ) : activeRenderer === 'file_index' ? (
+                    <FileIndexSection section={activeSection} reportFiles={reportFiles} matchesAnyPattern={matchesAnyPattern} />
                   ) : (
-                  /* QC Tab Content */
-                  <div>
-                    <QCSummaryDashboard
-                      patient={selectedPatient}
-                      qcData={qcData}
+                    <GenericTableSection
+                      section={activeSection}
+                      rows={activeGenericRows}
+                      selectedRow={selectedRow}
+                      setSelectedRow={setSelectedRow}
                     />
-                  </div>
                   )}
                 </div>
               )}
@@ -3085,8 +3167,56 @@ HLA-C*08:02	EICHTVYYQ	Indel	NPM1	11	94024257	94024259	TA	GGGT	indel	TA>GGGT	p.M1
       );
     };
 
+    const EmptySection = ({ title, message }) => (
+      <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-8 text-center">
+        <Icon name="info" size={36} color="#6b7280" className="mx-auto mb-3" />
+        <h3 className="text-lg font-semibold text-gray-800 mb-2">{title}</h3>
+        <p className="text-sm text-gray-500">{message}</p>
+      </div>
+    );
+
+    const FileIndexSection = ({ section, reportFiles, matchesAnyPattern }) => {
+      const files = Object.values(reportFiles).filter(file => matchesAnyPattern(file.name, section?.patterns));
+      if (files.length === 0) {
+        return <EmptySection title="No files available" message={`No files matched the ${section.label || 'selected'} section.`} />;
+      }
+      return (
+        <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4 md:p-6">
+          <h3 className="text-lg font-semibold text-gray-800 mb-4">{section.label || 'Files'}</h3>
+          <div className="divide-y divide-gray-100">
+            {files.map(file => (
+              <div key={file.name} className="py-3 flex flex-col md:flex-row md:items-center md:justify-between gap-1">
+                <div>
+                  <div className="font-mono text-sm text-gray-800">{file.basename}</div>
+                  <div className="text-xs text-gray-500">{file.name}</div>
+                </div>
+                <div className="text-xs text-gray-500">{(file.rows || []).length.toLocaleString()} rows</div>
+              </div>
+            ))}
+          </div>
+        </div>
+      );
+    };
+
+    const GenericTableSection = ({ section, rows, selectedRow, setSelectedRow }) => {
+      if (!rows || rows.length === 0) {
+        return <EmptySection title="No table data available" message={`No rows matched the ${section.label || 'selected'} section. This may be expected for QC-only workflows.`} />;
+      }
+      return (
+        <DataTable
+          title={section.label || 'Report table'}
+          data={rows}
+          selectedRow={selectedRow}
+          setSelectedRow={setSelectedRow}
+          hasCustomFormula={false}
+          columnConfig={section?.table?.columns}
+          inferColumns={true}
+        />
+      );
+    };
+
     // Data Table Component
-    const DataTable = ({ data, selectedRow, setSelectedRow, hasCustomFormula, columnConfig }) => {
+    const DataTable = ({ data, selectedRow, setSelectedRow, hasCustomFormula, columnConfig, inferColumns = false, title = 'Data Table' }) => {
       const [sortColumn, setSortColumn] = useState(null);
       const [sortDirection, setSortDirection] = useState('desc');
 
@@ -3104,6 +3234,10 @@ HLA-C*08:02	EICHTVYYQ	Indel	NPM1	11	94024257	94024259	TA	GGGT	indel	TA>GGGT	p.M1
         else { setSortColumn(column); setSortDirection('desc'); }
       };
 
+      if (!data || data.length === 0) {
+        return <EmptySection title={title} message="No rows are available for this table." />;
+      }
+
       const defaultBaseColumns = [
         { key: 'peptide', label: 'Peptide' }, { key: 'allele', label: 'Allele' },
         { key: 'priority_score_maximum', label: 'Max Priority Score' },
@@ -3119,7 +3253,10 @@ HLA-C*08:02	EICHTVYYQ	Indel	NPM1	11	94024257	94024259	TA	GGGT	indel	TA>GGGT	p.M1
               : undefined
           }))
         : [];
-      const baseColumns = configuredColumns.length ? configuredColumns : defaultBaseColumns;
+      const inferredColumns = inferColumns && data?.[0]
+        ? Object.keys(data[0]).filter(key => !key.startsWith('_')).map(key => ({ key, label: key.replace(/_/g, ' ') }))
+        : [];
+      const baseColumns = configuredColumns.length ? configuredColumns : inferredColumns.length ? inferredColumns : defaultBaseColumns;
 
       // Add custom score column if formula is active
       const columns = hasCustomFormula
@@ -3137,7 +3274,7 @@ HLA-C*08:02	EICHTVYYQ	Indel	NPM1	11	94024257	94024259	TA	GGGT	indel	TA>GGGT	p.M1
 
       return (
         <div className="bg-white rounded-lg shadow-md p-4 md:p-6 mb-4 overflow-x-auto">
-          <h3 className="text-base font-semibold text-gray-800 mb-4">Data Table</h3>
+          <h3 className="text-base font-semibold text-gray-800 mb-4">{title}</h3>
           <table className="w-full border-collapse text-sm">
             <thead>
               <tr className="bg-gray-50">
@@ -3158,9 +3295,9 @@ HLA-C*08:02	EICHTVYYQ	Indel	NPM1	11	94024257	94024259	TA	GGGT	indel	TA>GGGT	p.M1
             </thead>
             <tbody>
               {sortedData.map((row, idx) => {
-                const isSelected = selectedRow?.peptide === row.peptide && selectedRow?.allele === row.allele;
+                const isSelected = selectedRow === row || (selectedRow?.peptide === row.peptide && selectedRow?.allele === row.allele);
                 return (
-                  <tr key={`${row.peptide}-${row.allele}-${idx}`} onClick={() => setSelectedRow(row)} className={`cursor-pointer hover:bg-gray-100 transition ${isSelected ? 'bg-red-50' : idx % 2 === 0 ? 'bg-white' : 'bg-gray-50'}`}>
+                  <tr key={`${row._source_file || 'row'}-${row._row_index || idx}`} onClick={() => setSelectedRow(row)} className={`cursor-pointer hover:bg-gray-100 transition ${isSelected ? 'bg-red-50' : idx % 2 === 0 ? 'bg-white' : 'bg-gray-50'}`}>
                     {columns.map(col => (
                       <td
                         key={col.key}
