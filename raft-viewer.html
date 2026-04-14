@@ -52,7 +52,11 @@
         preload: params.get('preload') || '',
         preloadQc: params.get('preload_qc') || '',
         projectId: params.get('project_id') || '',
-        demo: params.get('demo') || ''
+        demo: params.get('demo') || '',
+        workflow: params.get('workflow') || '',
+        version: params.get('version') || '',
+        species: params.get('species') || '',
+        input: params.get('input') || ''
       };
     };
 
@@ -1085,6 +1089,64 @@ HLA-C*08:02	EICHTVYYQ	Indel	NPM1	11	94024257	94024259	TA	GGGT	indel	TA>GGGT	p.M1
       SKCM: ['BRAF-mutant', 'NRAS-mutant', 'NF1-mutant', 'Triple wild-type'],
     };
 
+    const DEFAULT_REPORT_TEMPLATE = {
+      schema_version: '1.0',
+      name: 'Default RAFT report',
+      description: 'Generic RAFT report layout.',
+      bundle_format: 'raft-report-bundle-v1',
+      layout: {
+        navigation: 'patients',
+        group_navigation: true,
+        collapsible_sidebar: true
+      },
+      sections: [
+        {
+          id: 'report',
+          label: 'Report',
+          renderer: 'lens_antigen_report',
+          source: 'lens',
+          default: true,
+          controls: {
+            show_filters: true,
+            show_visualizations: true,
+            show_table: true,
+            show_cards: true
+          },
+          table: {
+            columns: [
+              { key: 'peptide', label: 'Peptide' },
+              { key: 'allele', label: 'Allele' },
+              { key: 'priority_score_maximum', label: 'Max Priority Score', format: 'float' },
+              { key: 'mhcflurry_2.1.1.aff', label: 'MHCFlurry Aff', format: 'float' },
+              { key: 'ccf', label: 'CCF', format: 'float' },
+              { key: 'vaf', label: 'VAF', format: 'float' },
+              { key: 'tpm', label: 'Log2(TPM)', format: 'log2' },
+              { key: 'antigen_source', label: 'Source' }
+            ]
+          }
+        },
+        {
+          id: 'qc',
+          label: 'QC',
+          renderer: 'qc_summary',
+          source: 'qc'
+        }
+      ]
+    };
+
+    const normalizeReportTemplate = (template) => {
+      const base = template && typeof template === 'object' ? template : DEFAULT_REPORT_TEMPLATE;
+      const sections = Array.isArray(base.sections)
+        ? base.sections.filter(section => section && section.id && section.label)
+        : [];
+      return {
+        ...DEFAULT_REPORT_TEMPLATE,
+        ...base,
+        layout: { ...DEFAULT_REPORT_TEMPLATE.layout, ...(base.layout || {}) },
+        sections: sections.length ? sections : DEFAULT_REPORT_TEMPLATE.sections
+      };
+    };
+
     // Main Component
     const LENSViewer = () => {
       const [patients, setPatients] = useState({});
@@ -1112,7 +1174,8 @@ HLA-C*08:02	EICHTVYYQ	Indel	NPM1	11	94024257	94024259	TA	GGGT	indel	TA>GGGT	p.M1
       const [pasteError, setPasteError] = useState('');
       const [bundleError, setBundleError] = useState('');
       const [mobileView, setMobileView] = useState('visualizations'); // 'visualizations' or 'pmhcs'
-      const [patientTab, setPatientTab] = useState('pmhc'); // 'pmhc' or 'qc'
+      const [patientTab, setPatientTab] = useState('report');
+      const [reportTemplate, setReportTemplate] = useState(DEFAULT_REPORT_TEMPLATE);
       const [qcData, setQcData] = useState({}); // QC data organized by patient/sample
       const [cohortQcData, setCohortQcData] = useState(null); // Cohort-level QC summary
       const [manifestData, setManifestData] = useState(null); // Manifest group data
@@ -1244,14 +1307,20 @@ HLA-C*08:02	EICHTVYYQ	Indel	NPM1	11	94024257	94024259	TA	GGGT	indel	TA>GGGT	p.M1
         const filesMap = {};
         let bundleManifestData = null;
         let bundleQcData = null;
+        let bundleReportTemplate = null;
         Object.entries(entries).forEach(([name, content]) => {
-          if (name === 'raft-report-bundle.json') return;
-          if (name === 'manifest-groups.json') {
+          const basename = name.split('/').pop();
+          if (basename === 'raft-report-bundle.json') return;
+          if (basename === 'manifest-groups.json') {
             bundleManifestData = JSON.parse(textDecoder.decode(content));
             return;
           }
-          if (name === 'qc-data.json') {
+          if (basename === 'qc-data.json') {
             bundleQcData = JSON.parse(textDecoder.decode(content));
+            return;
+          }
+          if (basename === 'report-ui.json' || basename.match(/\.report-ui\.json$/)) {
+            bundleReportTemplate = JSON.parse(textDecoder.decode(content));
             return;
           }
           if (!name.match(/\.(tsv|txt)$/i)) return;
@@ -1262,6 +1331,7 @@ HLA-C*08:02	EICHTVYYQ	Indel	NPM1	11	94024257	94024259	TA	GGGT	indel	TA>GGGT	p.M1
         }
         if (bundleManifestData) setManifestData(bundleManifestData);
         if (bundleQcData) setQcData(bundleQcData);
+        if (bundleReportTemplate) setReportTemplate(normalizeReportTemplate(bundleReportTemplate));
         loadFilesMap(filesMap, bundleManifestData);
       };
 
@@ -1445,6 +1515,29 @@ HLA-C*08:02	EICHTVYYQ	Indel	NPM1	11	94024257	94024259	TA	GGGT	indel	TA>GGGT	p.M1
           }
         };
         loadManifestData();
+      }, []);
+
+      // Fetch workflow-owned report template when running through the local RAFT API.
+      useEffect(() => {
+        const loadReportTemplate = async () => {
+          if (IS_GITHUB_HOSTED) return;
+          try {
+            const urlParams = getUrlParams();
+            const query = new URLSearchParams();
+            ['workflow', 'version', 'species', 'input'].forEach(key => {
+              if (urlParams[key]) query.set(key, urlParams[key]);
+            });
+            const suffix = query.toString() ? `?${query.toString()}` : '';
+            const resp = await fetch(`${API_BASE}/api/report-template${suffix}`);
+            if (resp.ok) {
+              const data = await resp.json();
+              setReportTemplate(normalizeReportTemplate(data));
+            }
+          } catch (e) {
+            console.warn('No report template available:', e);
+          }
+        };
+        loadReportTemplate();
       }, []);
 
       // Fetch QC data from backend
@@ -1860,6 +1953,27 @@ HLA-C*08:02	EICHTVYYQ	Indel	NPM1	11	94024257	94024259	TA	GGGT	indel	TA>GGGT	p.M1
         return allData;
       }, [patients]);
 
+      const reportSections = useMemo(() => {
+        return normalizeReportTemplate(reportTemplate).sections;
+      }, [reportTemplate]);
+
+      const activeSection = useMemo(() => {
+        return reportSections.find(section => section.id === patientTab)
+          || reportSections.find(section => section.default)
+          || reportSections[0]
+          || DEFAULT_REPORT_TEMPLATE.sections[0];
+      }, [reportSections, patientTab]);
+
+      const isQcSection = activeSection?.renderer === 'qc_summary'
+        || activeSection?.source === 'qc'
+        || activeSection?.id === 'qc'
+        || activeSection?.id === 'quality_control';
+
+      const activeSectionControls = activeSection?.controls || {};
+      const defaultReportSectionId = (reportSections.find(section =>
+        !(section.renderer === 'qc_summary' || section.source === 'qc' || section.id === 'qc' || section.id === 'quality_control')
+      ) || reportSections[0] || DEFAULT_REPORT_TEMPLATE.sections[0]).id;
+
       const toggleAllele = (allele) => {
         const newSet = new Set(selectedAlleles);
         newSet.has(allele) ? newSet.delete(allele) : newSet.add(allele);
@@ -2006,7 +2120,7 @@ HLA-C*08:02	EICHTVYYQ	Indel	NPM1	11	94024257	94024259	TA	GGGT	indel	TA>GGGT	p.M1
       // Main interface
       return (
         <div className="h-screen flex flex-col bg-gray-50">
-          <Header />
+          <Header reportTemplate={reportTemplate} />
           <div className="flex flex-1 min-h-0">
             {/* Sidebar */}
             <Sidebar
@@ -2024,6 +2138,8 @@ HLA-C*08:02	EICHTVYYQ	Indel	NPM1	11	94024257	94024259	TA	GGGT	indel	TA>GGGT	p.M1
               setSelectedGroup={setSelectedGroup}
               orderedGroups={orderedGroups}
               setOrderedGroups={setOrderedGroups}
+              setPatientTab={setPatientTab}
+              defaultReportSectionId={defaultReportSectionId}
             />
 
             {/* Main Content */}
@@ -2044,33 +2160,30 @@ HLA-C*08:02	EICHTVYYQ	Indel	NPM1	11	94024257	94024259	TA	GGGT	indel	TA>GGGT	p.M1
                 </div>
               ) : (
                 <div className="flex flex-col flex-1 min-h-0 overflow-y-auto p-4 md:p-6">
-                  {/* Patient-level tabs: pMHC vs QC */}
+                  {/* Patient-level sections are template-driven; patient/group navigation stays standard. */}
                   <div className="flex-shrink-0 mb-4 sticky top-0 z-10 bg-gray-50 -mx-4 md:-mx-6 px-4 md:px-6 pt-1 pb-2">
                     <div className="flex border-b border-gray-200">
-                      <button
-                        onClick={() => setPatientTab('pmhc')}
-                        className={`px-6 py-2 text-sm font-medium transition border-b-2 ${
-                          patientTab === 'pmhc'
-                            ? 'text-indigo-600 border-indigo-600'
-                            : 'text-gray-500 border-transparent hover:text-gray-700'
-                        }`}
-                      >
-                        pMHC Analysis
-                      </button>
-                      <button
-                        onClick={() => setPatientTab('qc')}
-                        className={`px-6 py-2 text-sm font-medium transition border-b-2 ${
-                          patientTab === 'qc'
-                            ? 'text-emerald-600 border-emerald-600'
-                            : 'text-gray-500 border-transparent hover:text-gray-700'
-                        }`}
-                      >
-                        Quality Control
-                      </button>
+                      {reportSections.map(section => {
+                        const selected = activeSection?.id === section.id;
+                        const qcLike = section.renderer === 'qc_summary' || section.source === 'qc' || section.id === 'qc' || section.id === 'quality_control';
+                        return (
+                          <button
+                            key={section.id}
+                            onClick={() => setPatientTab(section.id)}
+                            className={`px-6 py-2 text-sm font-medium transition border-b-2 ${
+                              selected
+                                ? `${qcLike ? 'text-emerald-600 border-emerald-600' : 'text-indigo-600 border-indigo-600'}`
+                                : 'text-gray-500 border-transparent hover:text-gray-700'
+                            }`}
+                          >
+                            {section.label}
+                          </button>
+                        );
+                      })}
                     </div>
                   </div>
 
-                  {patientTab === 'pmhc' ? (
+                  {!isQcSection ? (
                   <React.Fragment>
                   {/* Group sub-tabs for multi-group patients (manifest or QC-detected groups) */}
                   {patients[selectedPatient]?.isMultiGroup && (
@@ -2131,27 +2244,28 @@ HLA-C*08:02	EICHTVYYQ	Indel	NPM1	11	94024257	94024259	TA	GGGT	indel	TA>GGGT	p.M1
                     </div>
                   ) : (
                   <React.Fragment>
-                  {/* Controls */}
-                  <div className="flex-shrink-0">
-                    <PatientControls
-                      selectedPatient={selectedPatient}
-                      patients={patients}
-                      topN={topN}
-                      sortMetric={sortMetric}
-                      patientTopN={patientTopN} setPatientTopN={setPatientTopN}
-                      patientSortMetrics={patientSortMetrics} setPatientSortMetrics={setPatientSortMetrics}
-                      patientFormulas={patientFormulas} setPatientFormulas={setPatientFormulas}
-                      globalFormula={globalFormula}
-                      selectedAntigenSources={selectedAntigenSources}
-                      toggleAntigenSource={toggleAntigenSource}
-                      selectedAlleles={selectedAlleles}
-                      toggleAllele={toggleAllele}
-                      showAlleleTable={showAlleleTable} setShowAlleleTable={setShowAlleleTable}
-                      showDataTable={showDataTable} setShowDataTable={setShowDataTable}
-                      generateReport={generateReport}
-                      selectedGroup={selectedGroup}
-                    />
-                  </div>
+                  {activeSectionControls.show_filters !== false && (
+                    <div className="flex-shrink-0">
+                      <PatientControls
+                        selectedPatient={selectedPatient}
+                        patients={patients}
+                        topN={topN}
+                        sortMetric={sortMetric}
+                        patientTopN={patientTopN} setPatientTopN={setPatientTopN}
+                        patientSortMetrics={patientSortMetrics} setPatientSortMetrics={setPatientSortMetrics}
+                        patientFormulas={patientFormulas} setPatientFormulas={setPatientFormulas}
+                        globalFormula={globalFormula}
+                        selectedAntigenSources={selectedAntigenSources}
+                        toggleAntigenSource={toggleAntigenSource}
+                        selectedAlleles={selectedAlleles}
+                        toggleAllele={toggleAllele}
+                        showAlleleTable={showAlleleTable} setShowAlleleTable={setShowAlleleTable}
+                        showDataTable={showDataTable} setShowDataTable={setShowDataTable}
+                        generateReport={generateReport}
+                        selectedGroup={selectedGroup}
+                      />
+                    </div>
+                  )}
                   {/* Split panel: Visualizations on left, pMHC cards on right */}
                   {/* On small screens: tabs to switch views. On large screens: sticky sidebar + flowing cards */}
                   <div className="flex flex-col lg:flex-row gap-4">
@@ -2172,44 +2286,49 @@ HLA-C*08:02	EICHTVYYQ	Indel	NPM1	11	94024257	94024259	TA	GGGT	indel	TA>GGGT	p.M1
                     </div>
 
                     {/* Left Panel: Visualizations (sticky on desktop) */}
-                    <div className={`lg:w-1/2 ${mobileView !== 'visualizations' ? 'hidden lg:block' : ''}`}>
-                      <div className="lg:sticky lg:top-[60px] lg:max-h-[calc(100vh-90px)] lg:overflow-y-auto lg:pr-2">
-                        <VisualizationPanel
-                          fullPatientData={fullPatientData}
-                          topNData={currentPatientData}
-                          allPatientsData={allPatientsData}
-                          sortMetric={getActiveSortMetric()}
-                          selectedRow={selectedRow}
-                          setSelectedRow={setSelectedRow}
-                          topN={getActiveTopN()}
-                          selectedPatient={selectedPatient}
-                        />
+                    {activeSectionControls.show_visualizations !== false && (
+                      <div className={`lg:w-1/2 ${mobileView !== 'visualizations' ? 'hidden lg:block' : ''}`}>
+                        <div className="lg:sticky lg:top-[60px] lg:max-h-[calc(100vh-90px)] lg:overflow-y-auto lg:pr-2">
+                          <VisualizationPanel
+                            fullPatientData={fullPatientData}
+                            topNData={currentPatientData}
+                            allPatientsData={allPatientsData}
+                            sortMetric={getActiveSortMetric()}
+                            selectedRow={selectedRow}
+                            setSelectedRow={setSelectedRow}
+                            topN={getActiveTopN()}
+                            selectedPatient={selectedPatient}
+                          />
+                        </div>
                       </div>
-                    </div>
+                    )}
 
                     {/* Right Panel: Data Table + pMHC Cards */}
-                    <div className={`lg:w-1/2 ${mobileView !== 'pmhcs' ? 'hidden lg:block' : ''}`}>
+                    <div className={`${activeSectionControls.show_visualizations === false ? 'lg:w-full' : 'lg:w-1/2'} ${activeSectionControls.show_visualizations !== false && mobileView !== 'pmhcs' ? 'hidden lg:block' : ''}`}>
                       <div className="lg:pl-2">
-                        {showDataTable && (
+                        {showDataTable && activeSectionControls.show_table !== false && (
                           <DataTable
                             data={currentPatientData}
                             selectedRow={selectedRow}
                             setSelectedRow={setSelectedRow}
                             hasCustomFormula={!!(getActiveFormula() && getActiveFormula().trim())}
+                            columnConfig={activeSection?.table?.columns}
                           />
                         )}
 
-                        <PMHCCards
-                          data={currentPatientData}
-                          sortMetric={getActiveSortMetric()}
-                          comments={comments}
-                          setComments={setComments}
-                          selectedRow={selectedRow}
-                          setSelectedRow={setSelectedRow}
-                          hasCustomFormula={!!(getActiveFormula() && getActiveFormula().trim())}
-                          tumorType={selectedTumorType}
-                          tumorSubtype={selectedTumorSubtype}
-                        />
+                        {activeSectionControls.show_cards !== false && (
+                          <PMHCCards
+                            data={currentPatientData}
+                            sortMetric={getActiveSortMetric()}
+                            comments={comments}
+                            setComments={setComments}
+                            selectedRow={selectedRow}
+                            setSelectedRow={setSelectedRow}
+                            hasCustomFormula={!!(getActiveFormula() && getActiveFormula().trim())}
+                            tumorType={selectedTumorType}
+                            tumorSubtype={selectedTumorSubtype}
+                          />
+                        )}
                       </div>
                     </div>
                   </div>
@@ -2234,15 +2353,15 @@ HLA-C*08:02	EICHTVYYQ	Indel	NPM1	11	94024257	94024259	TA	GGGT	indel	TA>GGGT	p.M1
     };
 
     // Header Component
-    const Header = () => (
+    const Header = ({ reportTemplate }) => (
       <div className="bg-white border-b border-gray-200 px-4 md:px-6 py-4 shadow-sm">
-        <h1 className="text-2xl md:text-3xl font-bold text-gray-900 mb-1">LENS Visualization and Report Generator</h1>
-        <p className="text-sm text-gray-600">Multi-patient pMHC prioritization and analysis platform</p>
+        <h1 className="text-2xl md:text-3xl font-bold text-gray-900 mb-1">{reportTemplate?.name || 'RAFT Report Viewer'}</h1>
+        <p className="text-sm text-gray-600">{reportTemplate?.description || 'Workflow-customizable RAFT report and QC viewer'}</p>
       </div>
     );
 
     // Sidebar Component
-    const Sidebar = ({ patients, selectedPatient, setSelectedPatient, setSelectedAlleles, setSelectedAntigenSources, sidebarCollapsed, setSidebarCollapsed, viewMode, setViewMode, qcData, selectedGroup, setSelectedGroup, orderedGroups, setOrderedGroups }) => {
+    const Sidebar = ({ patients, selectedPatient, setSelectedPatient, setSelectedAlleles, setSelectedAntigenSources, sidebarCollapsed, setSidebarCollapsed, viewMode, setViewMode, qcData, selectedGroup, setSelectedGroup, orderedGroups, setOrderedGroups, setPatientTab, defaultReportSectionId }) => {
       const [sidebarDragIdx, setSidebarDragIdx] = useState(null);
 
       const handleGroupDrop = (targetIdx) => {
@@ -2255,6 +2374,7 @@ HLA-C*08:02	EICHTVYYQ	Indel	NPM1	11	94024257	94024259	TA	GGGT	indel	TA>GGGT	p.M1
       const handlePatientClick = (patientId) => {
         setViewMode('patient');
         setSelectedPatient(patientId);
+        setPatientTab(defaultReportSectionId);
         const patient = patients[patientId];
         if (patient.isMultiGroup && patient.groups.length > 0) {
           // Auto-select first group for multi-group patients
@@ -2273,7 +2393,7 @@ HLA-C*08:02	EICHTVYYQ	Indel	NPM1	11	94024257	94024259	TA	GGGT	indel	TA>GGGT	p.M1
         setViewMode('patient');
         setSelectedPatient(patientId);
         setSelectedGroup(group);
-        setPatientTab('pmhc');
+        setPatientTab(defaultReportSectionId);
         const patient = patients[patientId];
         if (group === 'joint') {
           // Joint analysis uses all data
@@ -2966,7 +3086,7 @@ HLA-C*08:02	EICHTVYYQ	Indel	NPM1	11	94024257	94024259	TA	GGGT	indel	TA>GGGT	p.M1
     };
 
     // Data Table Component
-    const DataTable = ({ data, selectedRow, setSelectedRow, hasCustomFormula }) => {
+    const DataTable = ({ data, selectedRow, setSelectedRow, hasCustomFormula, columnConfig }) => {
       const [sortColumn, setSortColumn] = useState(null);
       const [sortDirection, setSortDirection] = useState('desc');
 
@@ -2984,13 +3104,22 @@ HLA-C*08:02	EICHTVYYQ	Indel	NPM1	11	94024257	94024259	TA	GGGT	indel	TA>GGGT	p.M1
         else { setSortColumn(column); setSortDirection('desc'); }
       };
 
-      const baseColumns = [
+      const defaultBaseColumns = [
         { key: 'peptide', label: 'Peptide' }, { key: 'allele', label: 'Allele' },
         { key: 'priority_score_maximum', label: 'Max Priority Score' },
         { key: 'mhcflurry_2.1.1.aff', label: 'MHCFlurry Aff' },
         { key: 'ccf', label: 'CCF' }, { key: 'vaf', label: 'VAF' }, { key: 'tpm', label: 'Log2(TPM)', transform: v => { const num = parseFloat(v); return (!isNaN(num) && num > 0) ? Math.log2(num) : null; } },
         { key: 'antigen_source', label: 'Source' },
       ];
+      const configuredColumns = Array.isArray(columnConfig)
+        ? columnConfig.filter(col => col && col.key).map(col => ({
+            ...col,
+            transform: col.format === 'log2'
+              ? (v => { const num = parseFloat(v); return (!isNaN(num) && num > 0) ? Math.log2(num) : null; })
+              : undefined
+          }))
+        : [];
+      const baseColumns = configuredColumns.length ? configuredColumns : defaultBaseColumns;
 
       // Add custom score column if formula is active
       const columns = hasCustomFormula
@@ -2998,11 +3127,12 @@ HLA-C*08:02	EICHTVYYQ	Indel	NPM1	11	94024257	94024259	TA	GGGT	indel	TA>GGGT	p.M1
         : baseColumns;
 
       const formatValue = (col, value) => {
-        if (col.key === 'peptide' || col.key === 'allele' || col.key === 'antigen_source') return value || 'N/A';
+        if (col.key === 'peptide' || col.key === 'allele' || col.key === 'antigen_source' || col.format === 'text' || col.format === 'string') return value || 'N/A';
         if (value === null || value === undefined || value === '' || value === 'NA') return 'N/A';
         // Apply transform if available (e.g., log2 for TPM)
         const transformedValue = col.transform ? col.transform(value) : parseFloat(value);
-        return (transformedValue === null || isNaN(transformedValue)) ? 'N/A' : transformedValue.toFixed(3);
+        if (transformedValue === null || isNaN(transformedValue)) return String(value);
+        return transformedValue.toFixed(3);
       };
 
       return (
