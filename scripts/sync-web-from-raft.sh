@@ -7,7 +7,7 @@ TARGET_DIR="${TARGET_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 
 FILES=(
   "config-generator.html"
-  "lens-viewer.html"
+  "raft-viewer.html"
   "manifest-generator.html"
 )
 
