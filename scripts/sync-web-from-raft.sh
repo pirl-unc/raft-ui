@@ -14,7 +14,6 @@ copy_from_raft() {
 copy_from_raft "raft-config-generator.html" "config-generator.html"
 copy_from_raft "raft-manifest-generator.html" "manifest-generator.html"
 copy_from_raft "raft-cloud-launcher.html" "cloud-launcher.html"
-copy_from_raft "control-panel.html" "control-panel.html"
 copy_from_raft "raft-viewer.html" "raft-viewer.html"
 copy_from_raft "raft-viewer.html" "lens-viewer.html"
 
