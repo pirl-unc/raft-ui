@@ -1173,6 +1173,7 @@ HLA-C*08:02	EICHTVYYQ	Indel	NPM1	11	94024257	94024259	TA	GGGT	indel	TA>GGGT	p.M1
       const [pasteData, setPasteData] = useState('');
       const [pasteError, setPasteError] = useState('');
       const [bundleError, setBundleError] = useState('');
+      const [bundleStatus, setBundleStatus] = useState('');
       const [mobileView, setMobileView] = useState('visualizations'); // 'visualizations' or 'pmhcs'
       const [patientTab, setPatientTab] = useState('report');
       const [reportTemplate, setReportTemplate] = useState(DEFAULT_REPORT_TEMPLATE);
@@ -1268,17 +1269,27 @@ HLA-C*08:02	EICHTVYYQ	Indel	NPM1	11	94024257	94024259	TA	GGGT	indel	TA>GGGT	p.M1
         let parsed = {};
         const nextReportFiles = {};
         const activeManifest = manifestOverride || manifestData;
+        let parsedRows = 0;
         for (const [filename, content] of Object.entries(filesMap)) {
+          const rows = parseDelimitedRows(filename, content);
           nextReportFiles[filename] = {
             name: filename,
             basename: filename.split('/').pop(),
             content,
-            rows: parseDelimitedRows(filename, content)
+            rows
           };
+          parsedRows += rows.length;
           parsed = parseFileContent(filename, content, parsed, activeManifest);
         }
         setReportFiles(nextReportFiles);
         setPatients({...parsed});
+        const fileCount = Object.keys(nextReportFiles).length;
+        const patientCount = Object.keys(parsed).length;
+        if (fileCount > 0 && patientCount === 0) {
+          setBundleError(`Loaded ${fileCount} report file(s), but no patient rows were parsed. Check that the report files are tab-delimited and include a header row.`);
+        } else if (fileCount > 0) {
+          setBundleStatus(`Loaded ${fileCount} report file(s), ${parsedRows} row(s), and ${patientCount} patient(s).`);
+        }
         const firstId = Object.keys(parsed).sort()[0];
         if (firstId) {
           setSelectedPatient(firstId);
@@ -1340,9 +1351,13 @@ HLA-C*08:02	EICHTVYYQ	Indel	NPM1	11	94024257	94024259	TA	GGGT	indel	TA>GGGT	p.M1
         let bundleManifestData = null;
         let bundleQcData = null;
         let bundleReportTemplate = null;
+        let bundleMetadata = null;
         Object.entries(entries).forEach(([name, content]) => {
           const basename = name.split('/').pop();
-          if (basename === 'raft-report-bundle.json') return;
+          if (basename === 'raft-report-bundle.json') {
+            bundleMetadata = JSON.parse(textDecoder.decode(content));
+            return;
+          }
           if (basename === 'manifest-groups.json') {
             bundleManifestData = JSON.parse(textDecoder.decode(content));
             return;
@@ -1361,6 +1376,13 @@ HLA-C*08:02	EICHTVYYQ	Indel	NPM1	11	94024257	94024259	TA	GGGT	indel	TA>GGGT	p.M1
         if (bundleManifestData) setManifestData(bundleManifestData);
         if (bundleQcData) setQcData(bundleQcData);
         if (bundleReportTemplate) setReportTemplate(normalizeReportTemplate(bundleReportTemplate));
+        if (bundleMetadata?.file_counts) {
+          const reportCount = bundleMetadata.file_counts.lens || bundleMetadata.file_counts.report || 0;
+          setBundleStatus(`Bundle contains ${reportCount} report file(s).`);
+          if (reportCount === 0 && (bundleMetadata.report_patterns || []).length > 0) {
+            setBundleError(`Bundle contains no report files matching: ${bundleMetadata.report_patterns.join(', ')}`);
+          }
+        }
         if (Object.keys(filesMap).length > 0) {
           loadFilesMap(filesMap, bundleManifestData);
         } else {
@@ -1374,6 +1396,7 @@ HLA-C*08:02	EICHTVYYQ	Indel	NPM1	11	94024257	94024259	TA	GGGT	indel	TA>GGGT	p.M1
 
       const handleBundleUpload = (e) => {
         setBundleError('');
+        setBundleStatus('');
         const file = e.target.files && e.target.files[0];
         e.target.value = '';
         if (!file) return;
@@ -1420,15 +1443,28 @@ HLA-C*08:02	EICHTVYYQ	Indel	NPM1	11	94024257	94024259	TA	GGGT	indel	TA>GGGT	p.M1
       };
 
       // Parse file content with group support
+      const inferPatientIdFromFilename = (filename, manifest = null) => {
+        const parts = String(filename || '').split('/').filter(Boolean);
+        const manifestPatients = Object.keys(manifest?.patients || {});
+        const matchedPatient = manifestPatients.find(patientId => parts.includes(patientId));
+        if (matchedPatient) return matchedPatient;
+
+        if ((parts[0] === 'lens' || parts[0] === 'report') && parts.length >= 3) {
+          return parts[2];
+        }
+
+        const basename = parts.length ? parts[parts.length - 1] : String(filename || '');
+        const match = basename.match(/^[^-]+-([^-]+)-/);
+        if (match) return match[1];
+        return basename.split('.')[0].split('-')[0] || basename.split('_')[0] || 'unknown';
+      };
+
       const parseFileContent = (filename, content, parsedPatients, manifest = null) => {
         const lines = content.split('\n');
         if (lines.length < 2) return parsedPatients;
         const headers = lines[0].split('\t');
 
-        // Extract patient ID from filename
-        const basename = filename.split('/').pop();
-        const match = basename.match(/^[^-]+-([^-]+)-/);
-        const patientId = match ? match[1] : basename.split('.')[0].split('-')[0] || basename.split('_')[0];
+        const patientId = inferPatientIdFromFilename(filename, manifest);
 
         // Determine which groups this file belongs to
         const runNames = extractRunNamesFromFilename(filename);
@@ -1725,16 +1761,15 @@ HLA-C*08:02	EICHTVYYQ	Indel	NPM1	11	94024257	94024259	TA	GGGT	indel	TA>GGGT	p.M1
 
       // Extract run names from filename (separated by '+')
       const extractRunNamesFromFilename = (filename) => {
-        // Remove directory prefix if present (lens/filename.tsv -> filename.tsv)
-        const basename = filename.split('/').pop();
-        // Run names are separated by '+' in the filename
+        const pathParts = String(filename || '').split('/').filter(Boolean);
+        const basename = pathParts.length ? pathParts[pathParts.length - 1] : String(filename || '');
+        const candidates = [...pathParts, ...basename.split('+')];
         // Example: PROJ-PAT001-ad-PAT001-pre+nd-PAT001-normal.lens.tsv
-        const parts = basename.split('+');
         const runNames = [];
-        for (const part of parts) {
+        for (const part of candidates) {
           // Extract run name pattern: prefix-identifier (e.g., ad-PAT001-pre, nd-PAT001-normal)
-          const match = part.match(/((?:ad|ar|nd|nr)-[^.+]+)/);
-          if (match) {
+          const match = part.match(/((?:ad|ar|nd|nr)-[^/.+]+)/);
+          if (match && !runNames.includes(match[1])) {
             runNames.push(match[1]);
           }
         }
@@ -2107,6 +2142,11 @@ HLA-C*08:02	EICHTVYYQ	Indel	NPM1	11	94024257	94024259	TA	GGGT	indel	TA>GGGT	p.M1
                     {bundleError && (
                       <div className="bg-red-50 border border-red-200 rounded-md p-4 mb-6 text-red-700 text-sm">
                         {bundleError}
+                      </div>
+                    )}
+                    {bundleStatus && !bundleError && (
+                      <div className="bg-blue-50 border border-blue-200 rounded-md p-4 mb-6 text-blue-700 text-sm">
+                        {bundleStatus}
                       </div>
                     )}
                     <div className="mx-auto mb-6 w-16 h-16 flex items-center justify-center">
