@@ -1179,6 +1179,7 @@ HLA-C*08:02	EICHTVYYQ	Indel	NPM1	11	94024257	94024259	TA	GGGT	indel	TA>GGGT	p.M1
       const [reportTemplate, setReportTemplate] = useState(DEFAULT_REPORT_TEMPLATE);
       const [reportFiles, setReportFiles] = useState({});
       const [qcData, setQcData] = useState({}); // QC data organized by patient/sample
+      const [qcFilesMap, setQcFilesMap] = useState({}); // bundle-relative-path -> Uint8Array for QC file access
       const [cohortQcData, setCohortQcData] = useState(null); // Cohort-level QC summary
       const [manifestData, setManifestData] = useState(null); // Manifest group data
       const [selectedGroup, setSelectedGroup] = useState(null); // Current group for multi-group patients
@@ -1348,6 +1349,7 @@ HLA-C*08:02	EICHTVYYQ	Indel	NPM1	11	94024257	94024259	TA	GGGT	indel	TA>GGGT	p.M1
         const entries = decodeTarEntries(bytes);
         const textDecoder = new TextDecoder();
         const filesMap = {};
+        const bundleQcFiles = {}; // bundle-relative-path -> Uint8Array for QC binary files
         let bundleManifestData = null;
         let bundleQcData = null;
         let bundleReportTemplate = null;
@@ -1370,9 +1372,15 @@ HLA-C*08:02	EICHTVYYQ	Indel	NPM1	11	94024257	94024259	TA	GGGT	indel	TA>GGGT	p.M1
             bundleReportTemplate = JSON.parse(textDecoder.decode(content));
             return;
           }
+          // Collect QC files (PDFs, HTML, images, etc.) for bundle-mode rendering
+          if (name.startsWith('qc/')) {
+            bundleQcFiles[name] = content;
+            return;
+          }
           if (!name.match(/\.(tsv|txt)$/i)) return;
           filesMap[name] = textDecoder.decode(content);
         });
+        if (Object.keys(bundleQcFiles).length > 0) setQcFilesMap(bundleQcFiles);
         if (bundleManifestData) setManifestData(bundleManifestData);
         if (bundleQcData) setQcData(bundleQcData);
         if (bundleReportTemplate) setReportTemplate(normalizeReportTemplate(bundleReportTemplate));
@@ -1392,6 +1400,25 @@ HLA-C*08:02	EICHTVYYQ	Indel	NPM1	11	94024257	94024259	TA	GGGT	indel	TA>GGGT	p.M1
         if (!bundleManifestData && !bundleQcData && !bundleReportTemplate && Object.keys(filesMap).length === 0) {
           throw new Error('Bundle did not contain report files, QC data, or a report UI template.');
         }
+      };
+
+      // Resolve QC file URL: use bundle data when available, fall back to API
+      const resolveQcFileUrl = (path) => {
+        // Empty path means the file was excluded from the bundle
+        if (!path) return null;
+        // Check bundle_paths mapping first (path already rewritten to bundle-relative)
+        const bundlePaths = qcData?.bundle_paths || {};
+        const bundlePath = bundlePaths[path] || path;
+        // If the path is already bundle-relative (starts with "qc/"), look it up directly
+        if (bundlePath.startsWith('qc/') && qcFilesMap[bundlePath]) {
+          const content = qcFilesMap[bundlePath];
+          const ext = bundlePath.split('.').pop().toLowerCase();
+          const mimeTypes = { pdf: 'application/pdf', html: 'text/html', htm: 'text/html', png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', svg: 'image/svg+xml', css: 'text/css', js: 'application/javascript' };
+          const blob = new Blob([content], { type: mimeTypes[ext] || 'application/octet-stream' });
+          return URL.createObjectURL(blob);
+        }
+        // Fall back to API endpoint (local server mode)
+        return `${API_BASE}/api/qc-file?path=${encodeURIComponent(path)}`;
       };
 
       const handleBundleUpload = (e) => {
@@ -2302,6 +2329,7 @@ HLA-C*08:02	EICHTVYYQ	Indel	NPM1	11	94024257	94024259	TA	GGGT	indel	TA>GGGT	p.M1
                     <QCSummaryDashboard
                       patient={selectedPatient}
                       qcData={qcData}
+                      resolveQcFileUrl={resolveQcFileUrl}
                     />
                   </div>
                   ) : isLensSection ? (
@@ -3766,23 +3794,26 @@ HLA-C*08:02	EICHTVYYQ	Indel	NPM1	11	94024257	94024259	TA	GGGT	indel	TA>GGGT	p.M1
               )}
 
               {/* PDF embeds */}
-              {files.filter(f => f.type === 'pdf').map((f, i) => (
+              {files.filter(f => f.type === 'pdf' && resolveQcFileUrl(f.path)).map((f, i) => (
                 <div key={i}>
                   <h4 className="text-sm font-medium text-gray-700 mb-2">{f.name}</h4>
                   <iframe
-                    src={`${API_BASE}/api/qc-file?path=${encodeURIComponent(f.path)}`}
+                    src={resolveQcFileUrl(f.path)}
                     className="w-full border border-gray-200 rounded"
                     style={{ height: '500px' }}
                     title={f.name}
                   />
                 </div>
               ))}
+              {files.filter(f => f.type === 'pdf' && !resolveQcFileUrl(f.path)).length > 0 && (
+                <p className="text-xs text-gray-400 italic">Some PDF files were too large to include in the bundle.</p>
+              )}
 
               {/* HTML links (IGV reports, qualimap reports) */}
-              {files.filter(f => f.type === 'html').map((f, i) => (
+              {files.filter(f => f.type === 'html' && resolveQcFileUrl(f.path)).map((f, i) => (
                 <div key={i}>
                   <a
-                    href={`${API_BASE}/api/qc-file?path=${encodeURIComponent(f.path)}`}
+                    href={resolveQcFileUrl(f.path)}
                     target="_blank"
                     rel="noopener noreferrer"
                     className="inline-flex items-center gap-2 text-sm text-indigo-600 hover:text-indigo-800 underline"
@@ -3792,6 +3823,9 @@ HLA-C*08:02	EICHTVYYQ	Indel	NPM1	11	94024257	94024259	TA	GGGT	indel	TA>GGGT	p.M1
                   </a>
                 </div>
               ))}
+              {files.filter(f => f.type === 'html' && !resolveQcFileUrl(f.path)).length > 0 && (
+                <p className="text-xs text-gray-400 italic">Some HTML reports were too large to include in the bundle.</p>
+              )}
 
               {!hasData && files.length === 0 && (
                 <p className="text-sm text-gray-500">No parsable data found for this tool.</p>
@@ -3824,7 +3858,7 @@ HLA-C*08:02	EICHTVYYQ	Indel	NPM1	11	94024257	94024259	TA	GGGT	indel	TA>GGGT	p.M1
     };
 
     // QC Summary Dashboard - curated per-sample metrics
-    const QCSummaryDashboard = ({ patient, qcData }) => {
+    const QCSummaryDashboard = ({ patient, qcData, resolveQcFileUrl }) => {
       const [showInDepth, setShowInDepth] = useState(false);
       const [selectedQcGroup, setSelectedQcGroup] = useState(null);
       useEffect(() => { setSelectedQcGroup(null); }, [patient]);
@@ -4078,15 +4112,15 @@ HLA-C*08:02	EICHTVYYQ	Indel	NPM1	11	94024257	94024259	TA	GGGT	indel	TA>GGGT	p.M1
               Reports & Figures
             </h3>
 
-            {funnel_plots.length > 0 && (
+            {funnel_plots.filter(f => resolveQcFileUrl(f.path)).length > 0 && (
               <div className="mb-4">
                 <h4 className="text-sm font-medium text-gray-700 mb-2">Funnel Plots</h4>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                  {funnel_plots.map((f, i) => (
+                  {funnel_plots.filter(f => resolveQcFileUrl(f.path)).map((f, i) => (
                     <div key={i}>
                       <div className="text-xs text-gray-500 mb-1">{f.tool.replace('lenstools_', '').replace('_funnel', '')} - {f.run_dir}</div>
                       <iframe
-                        src={`${API_BASE}/api/qc-file?path=${encodeURIComponent(f.path)}`}
+                        src={resolveQcFileUrl(f.path)}
                         className="w-full border border-gray-200 rounded"
                         style={{ height: '400px' }}
                         title={f.name}
@@ -4097,15 +4131,15 @@ HLA-C*08:02	EICHTVYYQ	Indel	NPM1	11	94024257	94024259	TA	GGGT	indel	TA>GGGT	p.M1
               </div>
             )}
 
-            {cnvkit.length > 0 && (
+            {cnvkit.filter(f => resolveQcFileUrl(f.path)).length > 0 && (
               <div className="mb-4">
                 <h4 className="text-sm font-medium text-gray-700 mb-2">CNVkit</h4>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                  {cnvkit.map((f, i) => (
+                  {cnvkit.filter(f => resolveQcFileUrl(f.path)).map((f, i) => (
                     <div key={i}>
                       <div className="text-xs text-gray-500 mb-1">{f.tool.replace('cnvkit_', '')} - {f.run_dir}</div>
                       <iframe
-                        src={`${API_BASE}/api/qc-file?path=${encodeURIComponent(f.path)}`}
+                        src={resolveQcFileUrl(f.path)}
                         className="w-full border border-gray-200 rounded"
                         style={{ height: '400px' }}
                         title={f.name}
@@ -4116,12 +4150,12 @@ HLA-C*08:02	EICHTVYYQ	Indel	NPM1	11	94024257	94024259	TA	GGGT	indel	TA>GGGT	p.M1
               </div>
             )}
 
-            {igv_reports.length > 0 && (
+            {igv_reports.filter(f => resolveQcFileUrl(f.path)).length > 0 && (
               <div className="mb-4">
                 <h4 className="text-sm font-medium text-gray-700 mb-2">IGV Reports</h4>
-                {igv_reports.map((f, i) => (
+                {igv_reports.filter(f => resolveQcFileUrl(f.path)).map((f, i) => (
                   <a key={i}
-                    href={`${API_BASE}/api/qc-file?path=${encodeURIComponent(f.path)}`}
+                    href={resolveQcFileUrl(f.path)}
                     target="_blank" rel="noopener noreferrer"
                     className="inline-flex items-center gap-2 text-sm text-indigo-600 hover:text-indigo-800 underline mr-4"
                   >
@@ -4132,15 +4166,15 @@ HLA-C*08:02	EICHTVYYQ	Indel	NPM1	11	94024257	94024259	TA	GGGT	indel	TA>GGGT	p.M1
               </div>
             )}
 
-            {other_pdfs.length > 0 && (
+            {other_pdfs.filter(f => resolveQcFileUrl(f.path)).length > 0 && (
               <div className="mb-4">
                 <h4 className="text-sm font-medium text-gray-700 mb-2">Other PDFs</h4>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                  {other_pdfs.map((f, i) => (
+                  {other_pdfs.filter(f => resolveQcFileUrl(f.path)).map((f, i) => (
                     <div key={i}>
                       <div className="text-xs text-gray-500 mb-1">{f.tool} - {f.run_dir}</div>
                       <iframe
-                        src={`${API_BASE}/api/qc-file?path=${encodeURIComponent(f.path)}`}
+                        src={resolveQcFileUrl(f.path)}
                         className="w-full border border-gray-200 rounded"
                         style={{ height: '400px' }}
                         title={f.name}
