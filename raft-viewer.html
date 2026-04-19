@@ -1310,6 +1310,7 @@ HLA-C*08:02	EICHTVYYQ	Indel	NPM1	11	94024257	94024259	TA	GGGT	indel	TA>GGGT	p.M1
       const decodeTarEntries = (bytes) => {
         const decoder = new TextDecoder();
         const entries = {};
+        let paxOverrides = {};
         let offset = 0;
         while (offset + 512 <= bytes.length) {
           const header = bytes.slice(offset, offset + 512);
@@ -1317,11 +1318,23 @@ HLA-C*08:02	EICHTVYYQ	Indel	NPM1	11	94024257	94024259	TA	GGGT	indel	TA>GGGT	p.M1
           if (isEmpty) break;
           const name = decoder.decode(header.slice(0, 100)).replace(/\0.*$/, '');
           const prefix = decoder.decode(header.slice(345, 500)).replace(/\0.*$/, '');
-          const fullName = prefix ? `${prefix}/${name}` : name;
           const sizeText = decoder.decode(header.slice(124, 136)).replace(/\0.*$/, '').trim();
           const size = parseInt(sizeText || '0', 8);
           const typeflag = String.fromCharCode(header[156] || 48);
           offset += 512;
+          if (typeflag === 'x') {
+            // PAX extended header — parse key=value pairs for next entry
+            const paxContent = decoder.decode(bytes.slice(offset, offset + size));
+            paxOverrides = {};
+            for (const line of paxContent.split('\n')) {
+              const m = line.match(/^\d+\s+(\w+)\s*=\s*(.+)$/);
+              if (m) paxOverrides[m[1]] = m[2];
+            }
+            offset += Math.ceil(size / 512) * 512;
+            continue;
+          }
+          let fullName = paxOverrides.path || (prefix ? `${prefix}/${name}` : name);
+          paxOverrides = {};
           if (typeflag === '0' || typeflag === '\0') {
             entries[fullName] = bytes.slice(offset, offset + size);
           }
