@@ -1352,20 +1352,53 @@ HLA-C*08:02	EICHTVYYQ	Indel	NPM1	11	94024257	94024259	TA	GGGT	indel	TA>GGGT	p.M1
         const decoder = new TextDecoder();
         const entries = {};
         let offset = 0;
+        let pendingPax = null;   // PAX header attrs for next entry
+        let globalPax = null;    // global PAX attrs
         while (offset + 512 <= bytes.length) {
           const header = bytes.slice(offset, offset + 512);
           const isEmpty = header.every(b => b === 0);
           if (isEmpty) break;
           const name = decoder.decode(header.slice(0, 100)).replace(/\0.*$/, '');
-          const prefix = decoder.decode(header.slice(345, 500)).replace(/\0.*$/, '');
-          const fullName = prefix ? `${prefix}/${name}` : name;
+          const prefix = decoder.decode(header.slice(345, 500)).replace(/\0.*$/, '').trim();
           const sizeText = decoder.decode(header.slice(124, 136)).replace(/\0.*$/, '').trim();
           const size = parseInt(sizeText || '0', 8);
           const typeflag = String.fromCharCode(header[156] || 48);
           offset += 512;
+
+          // PAX extended header (typeflag 'x') — apply to next entry
+          if (typeflag === 'x') {
+            const paxData = decoder.decode(bytes.slice(offset, offset + size));
+            const attrs = {};
+            for (const line of paxData.split('\n')) {
+              const m = line.match(/^\d+\s+(\S+?)=(.*)/);
+              if (m) attrs[m[1]] = m[2];
+            }
+            pendingPax = attrs;
+            offset += Math.ceil(size / 512) * 512;
+            continue;
+          }
+          // PAX global header (typeflag 'g')
+          if (typeflag === 'g') {
+            const paxData = decoder.decode(bytes.slice(offset, offset + size));
+            const attrs = {};
+            for (const line of paxData.split('\n')) {
+              const m = line.match(/^\d+\s+(\S+?)=(.*)/);
+              if (m) attrs[m[1]] = m[2];
+            }
+            globalPax = attrs;
+            offset += Math.ceil(size / 512) * 512;
+            continue;
+          }
+
+          // Regular file
           if (typeflag === '0' || typeflag === '\0') {
+            // Resolve full name: PAX path > prefix/name
+            let fullName = prefix ? `${prefix}/${name}` : name;
+            const mergedPax = { ...(globalPax || {}), ...(pendingPax || {}) };
+            if (mergedPax.path) fullName = mergedPax.path;
             entries[fullName] = bytes.slice(offset, offset + size);
           }
+          pendingPax = null;
           offset += Math.ceil(size / 512) * 512;
         }
         return entries;
