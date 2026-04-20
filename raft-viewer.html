@@ -2243,8 +2243,8 @@ HLA-C*08:02	EICHTVYYQ	Indel	NPM1	11	94024257	94024259	TA	GGGT	indel	TA>GGGT	p.M1
         a.click();
       };
 
-      // Upload screen
-      if (Object.keys(viewerPatients).length === 0 && Object.keys(reportFiles).length === 0) {
+      // Upload screen — also show when bundle patient selector is active
+      if ((Object.keys(viewerPatients).length === 0 && Object.keys(reportFiles).length === 0) || bundlePatients) {
         let uploadContent;
         if (isPreloading || (bundleStatus && !bundleError && Object.keys(patients).length === 0 && !bundlePatients)) {
           uploadContent = (
