@@ -1390,7 +1390,9 @@ HLA-C*08:02	EICHTVYYQ	Indel	NPM1	11	94024257	94024259	TA	GGGT	indel	TA>GGGT	p.M1
         const bytes = await maybeGunzip(new Uint8Array(arrayBuffer));
         setBundleStatus('Extracting tar entries...');
         const entries = decodeTarEntries(bytes);
-        const entryCount = Object.keys(entries).length;
+        const entryNames = Object.keys(entries);
+        const entryCount = entryNames.length;
+        console.log('[RAFT bundle] Decoded entries:', entryCount, entryNames.slice(0, 10));
         const textDecoder = new TextDecoder();
         let bundleManifestData = null;
         let bundleQcData = null;
@@ -1421,6 +1423,7 @@ HLA-C*08:02	EICHTVYYQ	Indel	NPM1	11	94024257	94024259	TA	GGGT	indel	TA>GGGT	p.M1
           tsvEntries.push({ name, size: content.byteLength });
           totalSizeBytes += content.byteLength;
         }
+        console.log('[RAFT bundle] TSV entries found:', tsvEntries.length, 'totalSize:', totalSizeBytes, 'hasQc:', !!bundleQcData, 'hasManifest:', !!bundleManifestData);
         if (bundleManifestData) setManifestData(bundleManifestData);
         if (bundleQcData) setQcData(bundleQcData);
         if (bundleReportTemplate) setReportTemplate(normalizeReportTemplate(bundleReportTemplate));
@@ -1435,6 +1438,7 @@ HLA-C*08:02	EICHTVYYQ	Indel	NPM1	11	94024257	94024259	TA	GGGT	indel	TA>GGGT	p.M1
           patientMap[pid].sizeBytes += entry.size;
         }
         const patientList = Object.values(patientMap).sort((a, b) => a.id.localeCompare(b.id));
+        console.log('[RAFT bundle] Patient list:', patientList.length, patientList.map(p => p.id));
 
         if (patientList.length === 0 && !bundleQcData && !bundleReportTemplate) {
           throw new Error('Bundle did not contain report files, QC data, or a report UI template.');
@@ -1442,6 +1446,7 @@ HLA-C*08:02	EICHTVYYQ	Indel	NPM1	11	94024257	94024259	TA	GGGT	indel	TA>GGGT	p.M1
 
         // If only one patient, skip selection and load directly
         if (patientList.length <= 1) {
+          console.log('[RAFT bundle] Single patient or QC-only, loading directly');
           setBundleStatus(patientList.length === 1
             ? `Loading 1 patient (${(totalSizeBytes / (1024 * 1024)).toFixed(1)} MB of data)...`
             : 'Loading QC data...');
@@ -1473,6 +1478,7 @@ HLA-C*08:02	EICHTVYYQ	Indel	NPM1	11	94024257	94024259	TA	GGGT	indel	TA>GGGT	p.M1
         }
 
         // Multiple patients: show selection UI, keep raw entries for phase 2
+        console.log('[RAFT bundle] Multiple patients, showing selector');
         setBundleEntries(entries);
         setBundlePatients(patientList);
         setBundleStatus(`Found ${patientList.length} patients in bundle. Select which to load.`);
