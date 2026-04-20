@@ -1148,6 +1148,46 @@ HLA-C*08:02	EICHTVYYQ	Indel	NPM1	11	94024257	94024259	TA	GGGT	indel	TA>GGGT	p.M1
     };
 
     // Main Component
+    const BundlePatientSelector = ({ patients, onLoad }) => {
+      const [selected, setSelected] = useState(new Set(patients.map(p => p.id)));
+      const allIds = patients.map(p => p.id);
+      const toggleAll = () => {
+        if (selected.size === allIds.length) { setSelected(new Set()); }
+        else { setSelected(new Set(allIds)); }
+      };
+      const toggle = (id) => {
+        const next = new Set(selected);
+        if (next.has(id)) next.delete(id); else next.add(id);
+        setSelected(next);
+      };
+      const totalMB = (patients.filter(p => selected.has(p.id)).reduce((s, p) => s + p.sizeBytes, 0) / (1024 * 1024)).toFixed(1);
+      return (
+        <div className="max-w-2xl mx-auto">
+          <h2 className="text-2xl font-bold text-gray-800 mb-2">Select Patients to Load</h2>
+          <p className="text-gray-600 mb-4">This bundle contains {patients.length} patients. Choose which to load.</p>
+          <div className="flex gap-2 mb-4">
+            <button onClick={toggleAll} className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition text-sm font-medium cursor-pointer">
+              {selected.size === allIds.length ? 'Deselect All' : 'Select All'}
+            </button>
+            <button onClick={() => selected.size > 0 && onLoad(Array.from(selected))} disabled={selected.size === 0}
+              className="px-4 py-2 bg-emerald-600 text-white rounded-md hover:bg-emerald-700 transition text-sm font-medium cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed">
+              Load {selected.size} Patient{selected.size !== 1 ? 's' : ''} ({totalMB} MB)
+            </button>
+          </div>
+          <div className="max-h-80 overflow-y-auto border border-gray-200 rounded-lg">
+            {patients.map(p => (
+              <label key={p.id} className="flex items-center gap-3 px-4 py-3 hover:bg-gray-50 cursor-pointer border-b border-gray-100 last:border-b-0">
+                <input type="checkbox" checked={selected.has(p.id)} onChange={() => toggle(p.id)}
+                  className="w-4 h-4 text-blue-600 rounded border-gray-300 focus:ring-blue-500" />
+                <span className="font-medium text-gray-800">{p.id}</span>
+                <span className="text-sm text-gray-500 ml-auto">{p.files.length} file{p.files.length !== 1 ? 's' : ''} &middot; {(p.sizeBytes / (1024 * 1024)).toFixed(1)} MB</span>
+              </label>
+            ))}
+          </div>
+        </div>
+      );
+    };
+
     const LENSViewer = () => {
       const [patients, setPatients] = useState({});
       const [selectedPatient, setSelectedPatient] = useState(null);
@@ -1174,12 +1214,13 @@ HLA-C*08:02	EICHTVYYQ	Indel	NPM1	11	94024257	94024259	TA	GGGT	indel	TA>GGGT	p.M1
       const [pasteError, setPasteError] = useState('');
       const [bundleError, setBundleError] = useState('');
       const [bundleStatus, setBundleStatus] = useState('');
+      const [bundleEntries, setBundleEntries] = useState(null); // {name: Uint8Array} raw tar entries kept for phase 2
+      const [bundlePatients, setBundlePatients] = useState(null); // [{id, files, sizeMB}] for patient selection
       const [mobileView, setMobileView] = useState('visualizations'); // 'visualizations' or 'pmhcs'
       const [patientTab, setPatientTab] = useState('report');
       const [reportTemplate, setReportTemplate] = useState(DEFAULT_REPORT_TEMPLATE);
       const [reportFiles, setReportFiles] = useState({});
       const [qcData, setQcData] = useState({}); // QC data organized by patient/sample
-      const [qcFilesMap, setQcFilesMap] = useState({}); // bundle-relative-path -> Uint8Array for QC file access
       const [cohortQcData, setCohortQcData] = useState(null); // Cohort-level QC summary
       const [manifestData, setManifestData] = useState(null); // Manifest group data
       const [selectedGroup, setSelectedGroup] = useState(null); // Current group for multi-group patients
@@ -1310,7 +1351,6 @@ HLA-C*08:02	EICHTVYYQ	Indel	NPM1	11	94024257	94024259	TA	GGGT	indel	TA>GGGT	p.M1
       const decodeTarEntries = (bytes) => {
         const decoder = new TextDecoder();
         const entries = {};
-        let paxOverrides = {};
         let offset = 0;
         while (offset + 512 <= bytes.length) {
           const header = bytes.slice(offset, offset + 512);
@@ -1318,23 +1358,11 @@ HLA-C*08:02	EICHTVYYQ	Indel	NPM1	11	94024257	94024259	TA	GGGT	indel	TA>GGGT	p.M1
           if (isEmpty) break;
           const name = decoder.decode(header.slice(0, 100)).replace(/\0.*$/, '');
           const prefix = decoder.decode(header.slice(345, 500)).replace(/\0.*$/, '');
+          const fullName = prefix ? `${prefix}/${name}` : name;
           const sizeText = decoder.decode(header.slice(124, 136)).replace(/\0.*$/, '').trim();
           const size = parseInt(sizeText || '0', 8);
           const typeflag = String.fromCharCode(header[156] || 48);
           offset += 512;
-          if (typeflag === 'x') {
-            // PAX extended header — parse key=value pairs for next entry
-            const paxContent = decoder.decode(bytes.slice(offset, offset + size));
-            paxOverrides = {};
-            for (const line of paxContent.split('\n')) {
-              const m = line.match(/^\d+\s+(\w+)\s*=\s*(.+)$/);
-              if (m) paxOverrides[m[1]] = m[2];
-            }
-            offset += Math.ceil(size / 512) * 512;
-            continue;
-          }
-          let fullName = paxOverrides.path || (prefix ? `${prefix}/${name}` : name);
-          paxOverrides = {};
           if (typeflag === '0' || typeflag === '\0') {
             entries[fullName] = bytes.slice(offset, offset + size);
           }
@@ -1358,80 +1386,131 @@ HLA-C*08:02	EICHTVYYQ	Indel	NPM1	11	94024257	94024259	TA	GGGT	indel	TA>GGGT	p.M1
       };
 
       const loadTarBundle = async (arrayBuffer) => {
+        setBundleStatus('Decompressing bundle...');
         const bytes = await maybeGunzip(new Uint8Array(arrayBuffer));
+        setBundleStatus('Extracting tar entries...');
         const entries = decodeTarEntries(bytes);
+        const entryCount = Object.keys(entries).length;
         const textDecoder = new TextDecoder();
-        const filesMap = {};
-        const bundleQcFiles = {}; // bundle-relative-path -> Uint8Array for QC binary files
         let bundleManifestData = null;
         let bundleQcData = null;
         let bundleReportTemplate = null;
         let bundleMetadata = null;
-        Object.entries(entries).forEach(([name, content]) => {
+        // Phase 1: Extract metadata only and collect TSV file names with sizes
+        const tsvEntries = [];
+        let totalSizeBytes = 0;
+        for (const [name, content] of Object.entries(entries)) {
           const basename = name.split('/').pop();
           if (basename === 'raft-report-bundle.json') {
             bundleMetadata = JSON.parse(textDecoder.decode(content));
-            return;
+            continue;
           }
           if (basename === 'manifest-groups.json') {
             bundleManifestData = JSON.parse(textDecoder.decode(content));
-            return;
+            continue;
           }
           if (basename === 'qc-data.json') {
             bundleQcData = JSON.parse(textDecoder.decode(content));
-            return;
+            continue;
           }
           if (basename === 'report-ui.json' || basename.match(/\.report-ui\.json$/)) {
             bundleReportTemplate = JSON.parse(textDecoder.decode(content));
-            return;
+            continue;
           }
-          // Collect QC files (PDFs, HTML, images, etc.) for bundle-mode rendering
-          if (name.startsWith('qc/')) {
-            bundleQcFiles[name] = content;
-            return;
-          }
-          if (!name.match(/\.(tsv|txt)$/i)) return;
-          filesMap[name] = textDecoder.decode(content);
-        });
-        if (Object.keys(bundleQcFiles).length > 0) setQcFilesMap(bundleQcFiles);
+          if (!name.match(/\.(tsv|txt)$/i)) continue;
+          tsvEntries.push({ name, size: content.byteLength });
+          totalSizeBytes += content.byteLength;
+        }
         if (bundleManifestData) setManifestData(bundleManifestData);
         if (bundleQcData) setQcData(bundleQcData);
         if (bundleReportTemplate) setReportTemplate(normalizeReportTemplate(bundleReportTemplate));
-        if (bundleMetadata?.file_counts) {
-          const reportCount = bundleMetadata.file_counts.lens || bundleMetadata.file_counts.report || 0;
-          setBundleStatus(`Bundle contains ${reportCount} report file(s).`);
-          if (reportCount === 0 && (bundleMetadata.report_patterns || []).length > 0) {
-            setBundleError(`Bundle contains no report files matching: ${bundleMetadata.report_patterns.join(', ')}`);
+
+        // Infer patient IDs from TSV paths using the manifest
+        const patientMap = {};
+        const manifestPatients = bundleManifestData ? Object.keys(bundleManifestData.patients || {}) : [];
+        for (const entry of tsvEntries) {
+          const pid = inferPatientIdFromFilename(entry.name, bundleManifestData);
+          if (!patientMap[pid]) patientMap[pid] = { id: pid, files: [], sizeBytes: 0 };
+          patientMap[pid].files.push(entry.name);
+          patientMap[pid].sizeBytes += entry.size;
+        }
+        const patientList = Object.values(patientMap).sort((a, b) => a.id.localeCompare(b.id));
+
+        if (patientList.length === 0 && !bundleQcData && !bundleReportTemplate) {
+          throw new Error('Bundle did not contain report files, QC data, or a report UI template.');
+        }
+
+        // If only one patient, skip selection and load directly
+        if (patientList.length <= 1) {
+          setBundleStatus(patientList.length === 1
+            ? `Loading 1 patient (${(totalSizeBytes / (1024 * 1024)).toFixed(1)} MB of data)...`
+            : 'Loading QC data...');
+          await new Promise(r => setTimeout(r, 0));
+          const filesMap = {};
+          for (const entry of tsvEntries) {
+            filesMap[entry.name] = textDecoder.decode(entries[entry.name]);
+          }
+          // Collect QC files
+          const bundleQcFiles = {};
+          for (const [name, content] of Object.entries(entries)) {
+            if (name.startsWith('qc/')) bundleQcFiles[name] = content;
+          }
+          if (Object.keys(bundleQcFiles).length > 0) setQcFilesMap(bundleQcFiles);
+          if (bundleMetadata?.file_counts) {
+            const reportCount = bundleMetadata.file_counts.reports || bundleMetadata.file_counts.lens || bundleMetadata.file_counts.report || 0;
+            setBundleStatus(`Bundle contains ${reportCount} report file(s). Parsing data...`);
+          } else if (tsvEntries.length > 0) {
+            setBundleStatus(`Parsing ${tsvEntries.length} report file(s)...`);
+          }
+          if (Object.keys(filesMap).length > 0) {
+            loadFilesMap(filesMap, bundleManifestData);
+          } else {
+            setReportFiles({});
+            setPatients({});
+          }
+          setIsPreloading(false);
+          return;
+        }
+
+        // Multiple patients: show selection UI, keep raw entries for phase 2
+        setBundleEntries(entries);
+        setBundlePatients(patientList);
+        setBundleStatus(`Found ${patientList.length} patients in bundle. Select which to load.`);
+        setIsPreloading(false);
+      };
+
+      const loadSelectedPatients = async (selectedPatientIds) => {
+        setIsPreloading(true);
+        setBundleStatus('Loading selected patients...');
+        const textDecoder = new TextDecoder();
+        const entries = bundleEntries;
+        const bundleQcFiles = {};
+        const filesMap = {};
+        // Load TSV files for selected patients
+        for (const [name, content] of Object.entries(entries)) {
+          const basename = name.split('/').pop();
+          if (basename === 'raft-report-bundle.json' || basename === 'manifest-groups.json' ||
+              basename === 'qc-data.json' || basename === 'report-ui.json' || basename.match(/\.report-ui\.json$/)) {
+            continue;
+          }
+          if (name.startsWith('qc/')) { bundleQcFiles[name] = content; continue; }
+          if (!name.match(/\.(tsv|txt)$/i)) continue;
+          const pid = inferPatientIdFromFilename(name, manifestData);
+          if (selectedPatientIds.includes(pid)) {
+            filesMap[name] = textDecoder.decode(content);
           }
         }
+        if (Object.keys(bundleQcFiles).length > 0) setQcFilesMap(bundleQcFiles);
+        setBundleStatus(`Loaded ${Object.keys(filesMap).length} file(s). Parsing data...`);
+        await new Promise(r => setTimeout(r, 0));
         if (Object.keys(filesMap).length > 0) {
-          loadFilesMap(filesMap, bundleManifestData);
+          loadFilesMap(filesMap, manifestData);
         } else {
           setReportFiles({});
           setPatients({});
         }
-        if (!bundleManifestData && !bundleQcData && !bundleReportTemplate && Object.keys(filesMap).length === 0) {
-          throw new Error('Bundle did not contain report files, QC data, or a report UI template.');
-        }
-      };
-
-      // Resolve QC file URL: use bundle data when available, fall back to API
-      const resolveQcFileUrl = (path) => {
-        // Empty path means the file was excluded from the bundle
-        if (!path) return null;
-        // Check bundle_paths mapping first (path already rewritten to bundle-relative)
-        const bundlePaths = qcData?.bundle_paths || {};
-        const bundlePath = bundlePaths[path] || path;
-        // If the path is already bundle-relative (starts with "qc/"), look it up directly
-        if (bundlePath.startsWith('qc/') && qcFilesMap[bundlePath]) {
-          const content = qcFilesMap[bundlePath];
-          const ext = bundlePath.split('.').pop().toLowerCase();
-          const mimeTypes = { pdf: 'application/pdf', html: 'text/html', htm: 'text/html', png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', svg: 'image/svg+xml', css: 'text/css', js: 'application/javascript' };
-          const blob = new Blob([content], { type: mimeTypes[ext] || 'application/octet-stream' });
-          return URL.createObjectURL(blob);
-        }
-        // Fall back to API endpoint (local server mode)
-        return `${API_BASE}/api/qc-file?path=${encodeURIComponent(path)}`;
+        setBundlePatients(null); // Hide selection UI
+        setIsPreloading(false);
       };
 
       const handleBundleUpload = (e) => {
@@ -1441,12 +1520,17 @@ HLA-C*08:02	EICHTVYYQ	Indel	NPM1	11	94024257	94024259	TA	GGGT	indel	TA>GGGT	p.M1
         e.target.value = '';
         if (!file) return;
 
+        const sizeMB = (file.size / (1024 * 1024)).toFixed(1);
+        setBundleStatus(`Reading ${file.name} (${sizeMB} MB)...`);
+        setIsPreloading(true);
+
         const reader = new FileReader();
         reader.onload = async () => {
           try {
             if (file.name.match(/\.(tar|tgz|tar\.gz)$/i)) {
               await loadTarBundle(reader.result);
             } else {
+              setBundleStatus('Parsing bundle...');
               const bundleText = String(new TextDecoder().decode(new Uint8Array(reader.result)) || '');
               const bundle = JSON.parse(bundleText);
               const filesMap = bundle.files || bundle;
@@ -1457,9 +1541,11 @@ HLA-C*08:02	EICHTVYYQ	Indel	NPM1	11	94024257	94024259	TA	GGGT	indel	TA>GGGT	p.M1
             }
           } catch (err) {
             setBundleError(`Failed to load bundle: ${err.message}`);
+          } finally {
+            setIsPreloading(false);
           }
         };
-        reader.onerror = () => setBundleError('Failed to read selected bundle file.');
+        reader.onerror = () => { setBundleError('Failed to read selected bundle file.'); setIsPreloading(false); };
         reader.readAsArrayBuffer(file);
       };
 
@@ -2164,16 +2250,17 @@ HLA-C*08:02	EICHTVYYQ	Indel	NPM1	11	94024257	94024259	TA	GGGT	indel	TA>GGGT	p.M1
             <Header reportTemplate={reportTemplate} />
             <div className="max-w-3xl mx-auto mt-12">
               <div className="bg-white rounded-lg shadow-md p-8 text-center border-2 border-dashed border-gray-300">
-                {isPreloading ? (
+                {(isPreloading || (bundleStatus && !bundleError && Object.keys(patients).length === 0 && !bundlePatients)) ? (
                   <>
                     <div className="mx-auto mb-6 w-16 h-16 flex items-center justify-center">
                       <Icon name="loader-2" size={48} color="#6b7280" className="animate-spin" />
                     </div>
-                    <h2 className="text-2xl font-bold text-gray-800 mb-2">Loading LENS Reports...</h2>
-                    <p className="text-gray-500">Please wait while we fetch your data.</p>
+                    <h2 className="text-2xl font-bold text-gray-800 mb-2">{bundleStatus || 'Loading LENS Reports...'}</h2>
+                    <p className="text-gray-500">Please wait while we process your data.</p>
                   </>
+                ) : bundlePatients ? (
+                  <BundlePatientSelector patients={bundlePatients} onLoad={loadSelectedPatients} />
                 ) : (
-                  <>
                     {preloadError && (
                       <div className="bg-red-50 border border-red-200 rounded-md p-4 mb-6 text-red-700 text-sm">
                         {preloadError}
@@ -2342,7 +2429,6 @@ HLA-C*08:02	EICHTVYYQ	Indel	NPM1	11	94024257	94024259	TA	GGGT	indel	TA>GGGT	p.M1
                     <QCSummaryDashboard
                       patient={selectedPatient}
                       qcData={qcData}
-                      resolveQcFileUrl={resolveQcFileUrl}
                     />
                   </div>
                   ) : isLensSection ? (
@@ -3807,26 +3893,23 @@ HLA-C*08:02	EICHTVYYQ	Indel	NPM1	11	94024257	94024259	TA	GGGT	indel	TA>GGGT	p.M1
               )}
 
               {/* PDF embeds */}
-              {files.filter(f => f.type === 'pdf' && resolveQcFileUrl(f.path)).map((f, i) => (
+              {files.filter(f => f.type === 'pdf').map((f, i) => (
                 <div key={i}>
                   <h4 className="text-sm font-medium text-gray-700 mb-2">{f.name}</h4>
                   <iframe
-                    src={resolveQcFileUrl(f.path)}
+                    src={`${API_BASE}/api/qc-file?path=${encodeURIComponent(f.path)}`}
                     className="w-full border border-gray-200 rounded"
                     style={{ height: '500px' }}
                     title={f.name}
                   />
                 </div>
               ))}
-              {files.filter(f => f.type === 'pdf' && !resolveQcFileUrl(f.path)).length > 0 && (
-                <p className="text-xs text-gray-400 italic">Some PDF files were too large to include in the bundle.</p>
-              )}
 
               {/* HTML links (IGV reports, qualimap reports) */}
-              {files.filter(f => f.type === 'html' && resolveQcFileUrl(f.path)).map((f, i) => (
+              {files.filter(f => f.type === 'html').map((f, i) => (
                 <div key={i}>
                   <a
-                    href={resolveQcFileUrl(f.path)}
+                    href={`${API_BASE}/api/qc-file?path=${encodeURIComponent(f.path)}`}
                     target="_blank"
                     rel="noopener noreferrer"
                     className="inline-flex items-center gap-2 text-sm text-indigo-600 hover:text-indigo-800 underline"
@@ -3836,9 +3919,6 @@ HLA-C*08:02	EICHTVYYQ	Indel	NPM1	11	94024257	94024259	TA	GGGT	indel	TA>GGGT	p.M1
                   </a>
                 </div>
               ))}
-              {files.filter(f => f.type === 'html' && !resolveQcFileUrl(f.path)).length > 0 && (
-                <p className="text-xs text-gray-400 italic">Some HTML reports were too large to include in the bundle.</p>
-              )}
 
               {!hasData && files.length === 0 && (
                 <p className="text-sm text-gray-500">No parsable data found for this tool.</p>
@@ -3871,7 +3951,7 @@ HLA-C*08:02	EICHTVYYQ	Indel	NPM1	11	94024257	94024259	TA	GGGT	indel	TA>GGGT	p.M1
     };
 
     // QC Summary Dashboard - curated per-sample metrics
-    const QCSummaryDashboard = ({ patient, qcData, resolveQcFileUrl }) => {
+    const QCSummaryDashboard = ({ patient, qcData }) => {
       const [showInDepth, setShowInDepth] = useState(false);
       const [selectedQcGroup, setSelectedQcGroup] = useState(null);
       useEffect(() => { setSelectedQcGroup(null); }, [patient]);
@@ -4125,15 +4205,15 @@ HLA-C*08:02	EICHTVYYQ	Indel	NPM1	11	94024257	94024259	TA	GGGT	indel	TA>GGGT	p.M1
               Reports & Figures
             </h3>
 
-            {funnel_plots.filter(f => resolveQcFileUrl(f.path)).length > 0 && (
+            {funnel_plots.length > 0 && (
               <div className="mb-4">
                 <h4 className="text-sm font-medium text-gray-700 mb-2">Funnel Plots</h4>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                  {funnel_plots.filter(f => resolveQcFileUrl(f.path)).map((f, i) => (
+                  {funnel_plots.map((f, i) => (
                     <div key={i}>
                       <div className="text-xs text-gray-500 mb-1">{f.tool.replace('lenstools_', '').replace('_funnel', '')} - {f.run_dir}</div>
                       <iframe
-                        src={resolveQcFileUrl(f.path)}
+                        src={`${API_BASE}/api/qc-file?path=${encodeURIComponent(f.path)}`}
                         className="w-full border border-gray-200 rounded"
                         style={{ height: '400px' }}
                         title={f.name}
@@ -4144,15 +4224,15 @@ HLA-C*08:02	EICHTVYYQ	Indel	NPM1	11	94024257	94024259	TA	GGGT	indel	TA>GGGT	p.M1
               </div>
             )}
 
-            {cnvkit.filter(f => resolveQcFileUrl(f.path)).length > 0 && (
+            {cnvkit.length > 0 && (
               <div className="mb-4">
                 <h4 className="text-sm font-medium text-gray-700 mb-2">CNVkit</h4>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                  {cnvkit.filter(f => resolveQcFileUrl(f.path)).map((f, i) => (
+                  {cnvkit.map((f, i) => (
                     <div key={i}>
                       <div className="text-xs text-gray-500 mb-1">{f.tool.replace('cnvkit_', '')} - {f.run_dir}</div>
                       <iframe
-                        src={resolveQcFileUrl(f.path)}
+                        src={`${API_BASE}/api/qc-file?path=${encodeURIComponent(f.path)}`}
                         className="w-full border border-gray-200 rounded"
                         style={{ height: '400px' }}
                         title={f.name}
@@ -4163,12 +4243,12 @@ HLA-C*08:02	EICHTVYYQ	Indel	NPM1	11	94024257	94024259	TA	GGGT	indel	TA>GGGT	p.M1
               </div>
             )}
 
-            {igv_reports.filter(f => resolveQcFileUrl(f.path)).length > 0 && (
+            {igv_reports.length > 0 && (
               <div className="mb-4">
                 <h4 className="text-sm font-medium text-gray-700 mb-2">IGV Reports</h4>
-                {igv_reports.filter(f => resolveQcFileUrl(f.path)).map((f, i) => (
+                {igv_reports.map((f, i) => (
                   <a key={i}
-                    href={resolveQcFileUrl(f.path)}
+                    href={`${API_BASE}/api/qc-file?path=${encodeURIComponent(f.path)}`}
                     target="_blank" rel="noopener noreferrer"
                     className="inline-flex items-center gap-2 text-sm text-indigo-600 hover:text-indigo-800 underline mr-4"
                   >
@@ -4179,15 +4259,15 @@ HLA-C*08:02	EICHTVYYQ	Indel	NPM1	11	94024257	94024259	TA	GGGT	indel	TA>GGGT	p.M1
               </div>
             )}
 
-            {other_pdfs.filter(f => resolveQcFileUrl(f.path)).length > 0 && (
+            {other_pdfs.length > 0 && (
               <div className="mb-4">
                 <h4 className="text-sm font-medium text-gray-700 mb-2">Other PDFs</h4>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                  {other_pdfs.filter(f => resolveQcFileUrl(f.path)).map((f, i) => (
+                  {other_pdfs.map((f, i) => (
                     <div key={i}>
                       <div className="text-xs text-gray-500 mb-1">{f.tool} - {f.run_dir}</div>
                       <iframe
-                        src={resolveQcFileUrl(f.path)}
+                        src={`${API_BASE}/api/qc-file?path=${encodeURIComponent(f.path)}`}
                         className="w-full border border-gray-200 rounded"
                         style={{ height: '400px' }}
                         title={f.name}
