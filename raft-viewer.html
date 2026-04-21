@@ -1456,7 +1456,7 @@ HLA-C*08:02	EICHTVYYQ	Indel	NPM1	11	94024257	94024259	TA	GGGT	indel	TA>GGGT	p.M1
           tsvEntries.push({ name, size: content.byteLength });
           totalSizeBytes += content.byteLength;
         }
-        console.log('[RAFT bundle] TSV entries found:', tsvEntries.length, 'totalSize:', totalSizeBytes, 'hasQc:', !!bundleQcData, 'hasManifest:', !!bundleManifestData);
+        console.log('[RAFT bundle] TSV entries found:', tsvEntries.length, 'totalSize:', totalSizeBytes, 'hasQc:', !!bundleQcData, 'hasManifest:', !!bundleManifestData, 'hasTemplate:', !!bundleReportTemplate, 'templateRenderer:', bundleReportTemplate?.sections?.[0]?.renderer);
         if (bundleManifestData) setManifestData(bundleManifestData);
         if (bundleQcData) setQcData(bundleQcData);
         if (bundleReportTemplate) setReportTemplate(normalizeReportTemplate(bundleReportTemplate));
