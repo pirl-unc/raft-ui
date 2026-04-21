@@ -1139,11 +1139,23 @@ HLA-C*08:02	EICHTVYYQ	Indel	NPM1	11	94024257	94024259	TA	GGGT	indel	TA>GGGT	p.M1
       const sections = Array.isArray(base.sections)
         ? base.sections.filter(section => section && section.id && section.label)
         : [];
+      // Auto-upgrade: if a section has no explicit renderer or renderer='table'
+      // but the data contains peptide/allele columns (LENS-like), use lens_antigen_report
+      const enhancedSections = sections.map(section => {
+        if (section.source === 'qc' || section.renderer === 'qc_summary') return section;
+        if (!section.renderer || section.renderer === 'table') {
+          const cols = section.table?.columns || [];
+          const hasLens = cols.some(c => c.key === 'peptide' || c.key === 'allele')
+            || (section.patterns || []).some(p => p.includes('report') || p.includes('lens'));
+          if (hasLens) return { ...section, renderer: 'lens_antigen_report' };
+        }
+        return section;
+      });
       return {
         ...DEFAULT_REPORT_TEMPLATE,
         ...base,
         layout: { ...DEFAULT_REPORT_TEMPLATE.layout, ...(base.layout || {}) },
-        sections: sections.length ? sections : DEFAULT_REPORT_TEMPLATE.sections
+        sections: enhancedSections.length ? enhancedSections : DEFAULT_REPORT_TEMPLATE.sections
       };
     };
 
