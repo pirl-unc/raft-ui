@@ -1139,6 +1139,7 @@ HLA-C*08:02	EICHTVYYQ	Indel	NPM1	11	94024257	94024259	TA	GGGT	indel	TA>GGGT	p.M1
       const sections = Array.isArray(base.sections)
         ? base.sections.filter(section => section && section.id && section.label)
         : [];
+      console.log('[RAFT template] Raw sections:', JSON.stringify(sections.map(s => ({ id: s.id, renderer: s.renderer, source: s.source, hasCols: !!(s.table?.columns?.length), patterns: s.patterns }))));
       // Auto-upgrade: if a section has no explicit renderer or renderer='table'
       // but the data contains peptide/allele columns (LENS-like), use lens_antigen_report
       const enhancedSections = sections.map(section => {
@@ -1147,16 +1148,19 @@ HLA-C*08:02	EICHTVYYQ	Indel	NPM1	11	94024257	94024259	TA	GGGT	indel	TA>GGGT	p.M1
           const cols = section.table?.columns || [];
           const hasLens = cols.some(c => c.key === 'peptide' || c.key === 'allele')
             || (section.patterns || []).some(p => p.includes('report') || p.includes('lens'));
+          console.log('[RAFT template] Upgrade check:', section.id, 'renderer=', section.renderer, 'hasLens=', hasLens, 'cols=', cols.length, 'patterns=', section.patterns);
           if (hasLens) return { ...section, renderer: 'lens_antigen_report' };
         }
         return section;
       });
-      return {
+      const result = {
         ...DEFAULT_REPORT_TEMPLATE,
         ...base,
         layout: { ...DEFAULT_REPORT_TEMPLATE.layout, ...(base.layout || {}) },
         sections: enhancedSections.length ? enhancedSections : DEFAULT_REPORT_TEMPLATE.sections
       };
+      console.log('[RAFT template] Final sections:', JSON.stringify(result.sections.map(s => ({ id: s.id, renderer: s.renderer }))));
+      return result;
     };
 
     // Main Component
