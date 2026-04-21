@@ -2207,15 +2207,22 @@ HLA-C*08:02	EICHTVYYQ	Indel	NPM1	11	94024257	94024259	TA	GGGT	indel	TA>GGGT	p.M1
         const merged = {};
         // QC data provides patient IDs even when no report data is loaded
         const qcPatientIds = Object.keys(qcData?.summaries || qcData?.patients || {}).sort();
+        const metaMap = bundlePatientMeta || {};
         qcPatientIds.forEach(id => {
-          merged[id] = patients[id] || { id, isMultiGroup: false, groups: ['default'], files: [], data: [], alleles: new Set(), alleleSupport: {}, antigenSources: new Set(), _loading: true };
+          const meta = metaMap[id];
+          merged[id] = patients[id] || {
+            id, isMultiGroup: false, groups: ['default'], files: [], data: [],
+            alleles: meta?.alleles || new Set(), alleleSupport: {}, antigenSources: new Set(),
+            _loading: !patients[id],
+            _pmhcCount: meta?.pmhcCount || 0
+          };
         });
         // Loaded patients override stubs
         Object.keys(patients).forEach(id => { merged[id] = patients[id]; });
-        // Bundle patient IDs (from Phase 1 scan) fill any gaps with pMHC/allele metadata
+        // Bundle patient IDs fill any gaps (patients not in QC data)
         (bundlePatients || []).forEach(p => {
           if (!merged[p.id]) {
-            const meta = bundlePatientMeta?.[p.id];
+            const meta = metaMap[p.id];
             merged[p.id] = {
               id: p.id, isMultiGroup: false, groups: ['default'], files: [], data: [],
               alleles: meta?.alleles || new Set(), alleleSupport: {}, antigenSources: new Set(),
@@ -2223,8 +2230,7 @@ HLA-C*08:02	EICHTVYYQ	Indel	NPM1	11	94024257	94024259	TA	GGGT	indel	TA>GGGT	p.M1
               _pmhcCount: meta?.pmhcCount || 0
             };
           } else if (merged[p.id]._loading) {
-            // Fill in metadata for unloaded QC-only stubs
-            const meta = bundlePatientMeta?.[p.id];
+            const meta = metaMap[p.id];
             if (meta) {
               merged[p.id] = { ...merged[p.id], alleles: meta.alleles || merged[p.id].alleles, _pmhcCount: meta.pmhcCount || 0 };
             }
