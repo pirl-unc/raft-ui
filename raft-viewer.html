@@ -1220,11 +1220,30 @@ HLA-C*08:02	EICHTVYYQ	Indel	NPM1	11	94024257	94024259	TA	GGGT	indel	TA>GGGT	p.M1
       const [reportTemplate, setReportTemplate] = useState(DEFAULT_REPORT_TEMPLATE);
       const [reportFiles, setReportFiles] = useState({});
       const [qcData, setQcData] = useState({}); // QC data organized by patient/sample
+      const [qcFilesMap, setQcFilesMap] = useState(null); // {path: Uint8Array} for bundle QC file serving
       const [cohortQcData, setCohortQcData] = useState(null); // Cohort-level QC summary
       const [manifestData, setManifestData] = useState(null); // Manifest group data
       const [selectedGroup, setSelectedGroup] = useState(null); // Current group for multi-group patients
       const [orderedGroups, setOrderedGroups] = useState([]); // Draggable group order for multi-group patients
 
+      // Resolve QC file paths to blob URLs in bundle mode (stable across renders)
+      const qcFileUrls = useMemo(() => {
+        if (!qcFilesMap) return {};
+        const urls = {};
+        for (const [path, content] of Object.entries(qcFilesMap)) {
+          const ext = path.split('.').pop().toLowerCase();
+          const mimeTypes = { pdf: 'application/pdf', html: 'text/html', htm: 'text/html', json: 'application/json', tsv: 'text/tab-separated-values', txt: 'text/plain' };
+          const blob = new Blob([content], { type: mimeTypes[ext] || 'application/octet-stream' });
+          urls[path] = URL.createObjectURL(blob);
+        }
+        return urls;
+      }, [qcFilesMap]);
+
+      const getQcFileUrl = (path) => {
+        if (!path) return '';
+        if (qcFileUrls[path]) return qcFileUrls[path];
+        return `${API_BASE}/api/qc-file?path=${encodeURIComponent(path)}`;
+      };
 
       const matchesAnyPattern = (filename, patterns = []) => {
         if (!Array.isArray(patterns) || patterns.length === 0) return true;
@@ -2667,7 +2686,7 @@ HLA-C*08:02	EICHTVYYQ	Indel	NPM1	11	94024257	94024259	TA	GGGT	indel	TA>GGGT	p.M1
         setViewMode('patient');
         setSelectedPatient(patientId);
         setPatientTab(defaultReportSectionId);
-        const patient = patients[patientId];
+        const patient = viewerPatients[patientId] || patients[patientId];
         if (!patient || patient._loading) return; // data will load via useEffect
         if (patient.isMultiGroup && patient.groups.length > 0) {
           // Auto-select first group for multi-group patients
@@ -2750,10 +2769,10 @@ HLA-C*08:02	EICHTVYYQ	Indel	NPM1	11	94024257	94024259	TA	GGGT	indel	TA>GGGT	p.M1
 
             {/* Patients */}
             <h3 className="text-base font-semibold mb-3 text-gray-800 border-b-2 border-indigo-500 pb-2">
-              Patients ({Object.keys(patients).length})
+              Patients ({Object.keys(viewerPatients).length})
             </h3>
-            {Object.keys(patients).sort().map(patientId => {
-              const patient = patients[patientId];
+            {Object.keys(viewerPatients).sort().map(patientId => {
+              const patient = viewerPatients[patientId];
               const isSelected = selectedPatient === patientId && viewMode === 'patient';
               const isLoaded = patient && !patient._loading && patient.data && patient.data.length > 0;
               return (
@@ -3946,7 +3965,7 @@ HLA-C*08:02	EICHTVYYQ	Indel	NPM1	11	94024257	94024259	TA	GGGT	indel	TA>GGGT	p.M1
                 <div key={i}>
                   <h4 className="text-sm font-medium text-gray-700 mb-2">{f.name}</h4>
                   <iframe
-                    src={`${API_BASE}/api/qc-file?path=${encodeURIComponent(f.path)}`}
+                    src={getQcFileUrl(f.path)}
                     className="w-full border border-gray-200 rounded"
                     style={{ height: '500px' }}
                     title={f.name}
@@ -3958,7 +3977,7 @@ HLA-C*08:02	EICHTVYYQ	Indel	NPM1	11	94024257	94024259	TA	GGGT	indel	TA>GGGT	p.M1
               {files.filter(f => f.type === 'html').map((f, i) => (
                 <div key={i}>
                   <a
-                    href={`${API_BASE}/api/qc-file?path=${encodeURIComponent(f.path)}`}
+                    href={getQcFileUrl(f.path)}
                     target="_blank"
                     rel="noopener noreferrer"
                     className="inline-flex items-center gap-2 text-sm text-indigo-600 hover:text-indigo-800 underline"
@@ -4262,7 +4281,7 @@ HLA-C*08:02	EICHTVYYQ	Indel	NPM1	11	94024257	94024259	TA	GGGT	indel	TA>GGGT	p.M1
                     <div key={i}>
                       <div className="text-xs text-gray-500 mb-1">{f.tool.replace('lenstools_', '').replace('_funnel', '')} - {f.run_dir}</div>
                       <iframe
-                        src={`${API_BASE}/api/qc-file?path=${encodeURIComponent(f.path)}`}
+                        src={getQcFileUrl(f.path)}
                         className="w-full border border-gray-200 rounded"
                         style={{ height: '400px' }}
                         title={f.name}
@@ -4281,7 +4300,7 @@ HLA-C*08:02	EICHTVYYQ	Indel	NPM1	11	94024257	94024259	TA	GGGT	indel	TA>GGGT	p.M1
                     <div key={i}>
                       <div className="text-xs text-gray-500 mb-1">{f.tool.replace('cnvkit_', '')} - {f.run_dir}</div>
                       <iframe
-                        src={`${API_BASE}/api/qc-file?path=${encodeURIComponent(f.path)}`}
+                        src={getQcFileUrl(f.path)}
                         className="w-full border border-gray-200 rounded"
                         style={{ height: '400px' }}
                         title={f.name}
@@ -4297,7 +4316,7 @@ HLA-C*08:02	EICHTVYYQ	Indel	NPM1	11	94024257	94024259	TA	GGGT	indel	TA>GGGT	p.M1
                 <h4 className="text-sm font-medium text-gray-700 mb-2">IGV Reports</h4>
                 {igv_reports.map((f, i) => (
                   <a key={i}
-                    href={`${API_BASE}/api/qc-file?path=${encodeURIComponent(f.path)}`}
+                    href={getQcFileUrl(f.path)}
                     target="_blank" rel="noopener noreferrer"
                     className="inline-flex items-center gap-2 text-sm text-indigo-600 hover:text-indigo-800 underline mr-4"
                   >
@@ -4316,7 +4335,7 @@ HLA-C*08:02	EICHTVYYQ	Indel	NPM1	11	94024257	94024259	TA	GGGT	indel	TA>GGGT	p.M1
                     <div key={i}>
                       <div className="text-xs text-gray-500 mb-1">{f.tool} - {f.run_dir}</div>
                       <iframe
-                        src={`${API_BASE}/api/qc-file?path=${encodeURIComponent(f.path)}`}
+                        src={getQcFileUrl(f.path)}
                         className="w-full border border-gray-200 rounded"
                         style={{ height: '400px' }}
                         title={f.name}
