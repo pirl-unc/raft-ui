@@ -2686,7 +2686,7 @@ HLA-C*08:02	EICHTVYYQ	Indel	NPM1	11	94024257	94024259	TA	GGGT	indel	TA>GGGT	p.M1
         setViewMode('patient');
         setSelectedPatient(patientId);
         setPatientTab(defaultReportSectionId);
-        const patient = viewerPatients[patientId] || patients[patientId];
+        const patient = patients[patientId];
         if (!patient || patient._loading) return; // data will load via useEffect
         if (patient.isMultiGroup && patient.groups.length > 0) {
           // Auto-select first group for multi-group patients
@@ -2769,10 +2769,10 @@ HLA-C*08:02	EICHTVYYQ	Indel	NPM1	11	94024257	94024259	TA	GGGT	indel	TA>GGGT	p.M1
 
             {/* Patients */}
             <h3 className="text-base font-semibold mb-3 text-gray-800 border-b-2 border-indigo-500 pb-2">
-              Patients ({Object.keys(viewerPatients).length})
+              Patients ({Object.keys(patients).length})
             </h3>
-            {Object.keys(viewerPatients).sort().map(patientId => {
-              const patient = viewerPatients[patientId];
+            {Object.keys(patients).sort().map(patientId => {
+              const patient = patients[patientId];
               const isSelected = selectedPatient === patientId && viewMode === 'patient';
               const isLoaded = patient && !patient._loading && patient.data && patient.data.length > 0;
               return (
