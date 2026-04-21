@@ -1209,9 +1209,6 @@ HLA-C*08:02	EICHTVYYQ	Indel	NPM1	11	94024257	94024259	TA	GGGT	indel	TA>GGGT	p.M1
       const [preloadError, setPreloadError] = useState('');
       const [selectedTumorType, setSelectedTumorType] = useState('BRCA');
       const [selectedTumorSubtype, setSelectedTumorSubtype] = useState('');
-      const [showPasteModal, setShowPasteModal] = useState(false);
-      const [pasteData, setPasteData] = useState('');
-      const [pasteError, setPasteError] = useState('');
       const [bundleError, setBundleError] = useState('');
       const [bundleStatus, setBundleStatus] = useState('');
       const [bundleEntries, setBundleEntries] = useState(null); // {name: Uint8Array} raw tar entries kept for phase 2
@@ -1228,63 +1225,6 @@ HLA-C*08:02	EICHTVYYQ	Indel	NPM1	11	94024257	94024259	TA	GGGT	indel	TA>GGGT	p.M1
       const [selectedGroup, setSelectedGroup] = useState(null); // Current group for multi-group patients
       const [orderedGroups, setOrderedGroups] = useState([]); // Draggable group order for multi-group patients
 
-      // CRC32 implementation for checksum verification
-      const crc32 = (str) => {
-        const table = (() => {
-          const t = [];
-          for (let i = 0; i < 256; i++) {
-            let c = i;
-            for (let j = 0; j < 8; j++) c = (c & 1) ? (0xEDB88320 ^ (c >>> 1)) : (c >>> 1);
-            t[i] = c;
-          }
-          return t;
-        })();
-        let crc = 0xFFFFFFFF;
-        for (let i = 0; i < str.length; i++) crc = table[(crc ^ str.charCodeAt(i)) & 0xFF] ^ (crc >>> 8);
-        return (crc ^ 0xFFFFFFFF) >>> 0;
-      };
-
-      // Decode RAFT-encoded data from CLI
-      const decodeRaftData = (encoded) => {
-        const MAGIC = 'RAFT1:';
-        if (!encoded.startsWith(MAGIC)) {
-          throw new Error('Invalid format. Expected RAFT-encoded string starting with RAFT1:');
-        }
-
-        // Extract and verify checksum (last 8 hex chars after final colon)
-        const lastColonIdx = encoded.lastIndexOf(':');
-        const checksumHex = encoded.slice(lastColonIdx + 1);
-        if (!/^[0-9a-f]{8}$/i.test(checksumHex)) {
-          throw new Error('Invalid or missing checksum. Make sure you copied the entire string.');
-        }
-        const dataWithoutChecksum = encoded.slice(0, lastColonIdx);
-        const expectedChecksum = parseInt(checksumHex, 16);
-        const actualChecksum = crc32(dataWithoutChecksum);
-        if (actualChecksum !== expectedChecksum) {
-          throw new Error(`Checksum mismatch! The string may be incomplete or corrupted.\nExpected: ${checksumHex}, Got: ${actualChecksum.toString(16).padStart(8, '0')}\nMake sure you copied the entire string including the checksum at the end.`);
-        }
-
-        const remainder = dataWithoutChecksum.slice(MAGIC.length);
-        const colonIdx = remainder.indexOf(':');
-        if (colonIdx === -1) throw new Error('Invalid format. Missing data type.');
-        const dataType = remainder.slice(0, colonIdx);
-        const base64Data = remainder.slice(colonIdx + 1);
-        if (dataType !== 'lens-data') {
-          throw new Error(`Unexpected data type: ${dataType}. Expected lens-data.`);
-        }
-        // Decode base64 and decompress
-        const binaryStr = atob(base64Data);
-        const bytes = new Uint8Array(binaryStr.length);
-        for (let i = 0; i < binaryStr.length; i++) bytes[i] = binaryStr.charCodeAt(i);
-        // Use DecompressionStream for gzip decompression
-        return new Promise((resolve, reject) => {
-          const ds = new DecompressionStream('gzip');
-          const writer = ds.writable.getWriter();
-          writer.write(bytes);
-          writer.close();
-          new Response(ds.readable).text().then(resolve).catch(reject);
-        });
-      };
 
       const matchesAnyPattern = (filename, patterns = []) => {
         if (!Array.isArray(patterns) || patterns.length === 0) return true;
@@ -1650,25 +1590,6 @@ HLA-C*08:02	EICHTVYYQ	Indel	NPM1	11	94024257	94024259	TA	GGGT	indel	TA>GGGT	p.M1
         };
         reader.onerror = () => { setBundleError('Failed to read selected bundle file.'); setIsPreloading(false); };
         reader.readAsArrayBuffer(file);
-      };
-
-      // Handle paste from CLI
-      const handlePasteSubmit = async () => {
-        setPasteError('');
-        try {
-          const cleanData = pasteData.trim();
-          if (!cleanData) {
-            setPasteError('Please paste the code from the CLI.');
-            return;
-          }
-          const jsonStr = await decodeRaftData(cleanData);
-          const files = JSON.parse(jsonStr);
-          loadFilesMap(files);
-          setShowPasteModal(false);
-          setPasteData('');
-        } catch (e) {
-          setPasteError(`Failed to decode: ${e.message}`);
-        }
       };
 
       // Parse file content with group support
@@ -2455,13 +2376,6 @@ HLA-C*08:02	EICHTVYYQ	Indel	NPM1	11	94024257	94024259	TA	GGGT	indel	TA>GGGT	p.M1
                   Choose Files
                   <input type="file" multiple accept=".tsv,.txt" onChange={handleFileUpload} className="hidden" />
                 </label>
-                <button
-                  onClick={() => setShowPasteModal(true)}
-                  className="px-6 py-3 bg-gray-700 text-white rounded-md hover:bg-gray-800 transition cursor-pointer text-sm font-medium flex items-center gap-2"
-                >
-                  <Icon name="clipboard-paste" size={18} />
-                  Paste from CLI
-                </button>
                 {IS_GITHUB_HOSTED && (
                   <label className="inline-block px-6 py-3 bg-emerald-600 text-white rounded-md hover:bg-emerald-700 transition cursor-pointer text-sm font-medium">
                     Load Bundle
@@ -2483,50 +2397,6 @@ HLA-C*08:02	EICHTVYYQ	Indel	NPM1	11	94024257	94024259	TA	GGGT	indel	TA>GGGT	p.M1
                 {uploadContent}
               </div>
             </div>
-
-            {/* Paste Modal */}
-            {showPasteModal && (
-              <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-                <div className="bg-white rounded-lg shadow-xl max-w-2xl w-full p-6">
-                  <div className="flex justify-between items-center mb-4">
-                    <h3 className="text-lg font-semibold text-gray-800">Paste Data from CLI</h3>
-                    <button onClick={() => { setShowPasteModal(false); setPasteError(''); setPasteData(''); }} className="text-gray-500 hover:text-gray-700 cursor-pointer">
-                      <Icon name="x" size={24} />
-                    </button>
-                  </div>
-                  <p className="text-sm text-gray-600 mb-4">
-                    Paste the encoded data string from the RAFT CLI output below.
-                    The string starts with <code className="bg-gray-100 px-1 rounded">RAFT1:lens-data:</code> and ends with a checksum.
-                    <br /><span className="text-gray-500">Make sure to copy the entire string including the final 8-character checksum.</span>
-                  </p>
-                  {pasteError && (
-                    <div className="bg-red-50 border border-red-200 rounded-md p-3 mb-4 text-red-700 text-sm">
-                      {pasteError}
-                    </div>
-                  )}
-                  <textarea
-                    value={pasteData}
-                    onChange={(e) => setPasteData(e.target.value)}
-                    placeholder="Paste RAFT1:lens-data:... here"
-                    className="w-full h-40 px-3 py-2 border border-gray-300 rounded-md font-mono text-xs focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none"
-                  />
-                  <div className="flex justify-end gap-3 mt-4">
-                    <button
-                      onClick={() => { setShowPasteModal(false); setPasteError(''); setPasteData(''); }}
-                      className="px-4 py-2 text-gray-700 border border-gray-300 rounded-md hover:bg-gray-50 transition cursor-pointer text-sm font-medium"
-                    >
-                      Cancel
-                    </button>
-                    <button
-                      onClick={handlePasteSubmit}
-                      className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition cursor-pointer text-sm font-medium"
-                    >
-                      Load Data
-                    </button>
-                  </div>
-                </div>
-              </div>
-            )}
           </div>
         );
       }
