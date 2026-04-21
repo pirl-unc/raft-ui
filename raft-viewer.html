@@ -46,6 +46,14 @@
     // API base for preloading
     const API_BASE = window.location.origin;
     const IS_GITHUB_HOSTED = window.location.hostname.includes('github.io');
+
+    // Module-level QC file URL cache (accessible from all components)
+    let _qcFileUrls = {};
+    const getQcFileUrl = (path) => {
+      if (!path) return '';
+      if (_qcFileUrls[path]) return _qcFileUrls[path];
+      return `${API_BASE}/api/qc-file?path=${encodeURIComponent(path)}`;
+    };
     const getUrlParams = () => {
       const params = new URLSearchParams(window.location.search);
       return {
@@ -1226,9 +1234,9 @@ HLA-C*08:02	EICHTVYYQ	Indel	NPM1	11	94024257	94024259	TA	GGGT	indel	TA>GGGT	p.M1
       const [selectedGroup, setSelectedGroup] = useState(null); // Current group for multi-group patients
       const [orderedGroups, setOrderedGroups] = useState([]); // Draggable group order for multi-group patients
 
-      // Resolve QC file paths to blob URLs in bundle mode (stable across renders)
-      const qcFileUrls = useMemo(() => {
-        if (!qcFilesMap) return {};
+      // Resolve QC file paths to blob URLs in bundle mode
+      useEffect(() => {
+        if (!qcFilesMap) { _qcFileUrls = {}; return; }
         const urls = {};
         for (const [path, content] of Object.entries(qcFilesMap)) {
           const ext = path.split('.').pop().toLowerCase();
@@ -1236,14 +1244,8 @@ HLA-C*08:02	EICHTVYYQ	Indel	NPM1	11	94024257	94024259	TA	GGGT	indel	TA>GGGT	p.M1
           const blob = new Blob([content], { type: mimeTypes[ext] || 'application/octet-stream' });
           urls[path] = URL.createObjectURL(blob);
         }
-        return urls;
+        _qcFileUrls = urls;
       }, [qcFilesMap]);
-
-      const getQcFileUrl = (path) => {
-        if (!path) return '';
-        if (qcFileUrls[path]) return qcFileUrls[path];
-        return `${API_BASE}/api/qc-file?path=${encodeURIComponent(path)}`;
-      };
 
       const matchesAnyPattern = (filename, patterns = []) => {
         if (!Array.isArray(patterns) || patterns.length === 0) return true;
@@ -2333,26 +2335,183 @@ HLA-C*08:02	EICHTVYYQ	Indel	NPM1	11	94024257	94024259	TA	GGGT	indel	TA>GGGT	p.M1
         setSelectedAntigenSources(newSet);
       };
 
-      const generateReport = () => {
-        const reportData = {
-          patients: Object.keys(patients),
-          selectedPatient,
-          topN: getActiveTopN(),
-          sortMetric: getActiveSortMetric(),
-          comments,
-          timestamp: new Date().toISOString(),
-          data: currentPatientData.map(row => ({
-            peptide: row.peptide, allele: row.allele,
-            priority_score: row[getActiveSortMetric()],
-            comment: comments[`${row.peptide}-${row.allele}`] || ''
-          }))
-        };
-        const blob = new Blob([JSON.stringify(reportData, null, 2)], { type: 'application/json' });
+      const generateReport = (type) => {
+        const patient = patients[selectedPatient];
+        if (!patient) return;
+        const sortMetric = getActiveSortMetric();
+        const allData = fullPatientData;
+        const topData = currentPatientData;
+        const sorted = [...allData].sort((a, b) => (parseFloat(b[sortMetric]) || 0) - (parseFloat(a[sortMetric]) || 0));
+        const isClinical = type === 'clinical';
+        const dateStr = new Date().toISOString().split('T')[0];
+        const esc = (s) => String(s == null ? '' : s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+        const fmt = (v, decimals = 2) => { const n = parseFloat(v); return isNaN(n) ? esc(v) : n.toFixed(decimals); };
+        const fmtPct = (v) => { const n = parseFloat(v); return isNaN(n) ? '-' : (n * 100).toFixed(1) + '%'; };
+        const fmtInt = (v) => { const n = parseFloat(v); return isNaN(n) ? '-' : n.toLocaleString(); };
+
+        // QC summary helper
+        const qcSummary = qcData?.summaries?.[selectedPatient];
+        const qcSamples = qcSummary?.samples || [];
+        const qcMulti = qcSummary?.multi_sample || [];
+        const qcFiles = qcSummary?.files || {};
+
+        // Build QC highlights for clinical report
+        let qcHighlightsHtml = '';
+        if (qcSamples.length > 0) {
+          qcHighlightsHtml = qcSamples.map(s => {
+            const m = {};
+            (s.metrics || []).forEach(met => { if (met.value != null) m[met.label] = met.value; });
+            return `<tr><td style="font-weight:600;padding:4px 8px;border:1px solid #e5e7eb;">${esc(s.label)}</td>
+              <td style="padding:4px 8px;border:1px solid #e5e7eb;">${fmtInt(m['Total Reads'])}</td>
+              <td style="padding:4px 8px;border:1px solid #e5e7eb;">${fmtPct(m['Q30 Rate'])}</td>
+              <td style="padding:4px 8px;border:1px solid #e5e7eb;">${fmtPct(m['Duplication Rate'])}</td>
+              <td style="padding:4px 8px;border:1px solid #e5e7eb;">${fmtPct(m['Uniquely Mapped'])}</td></tr>`;
+          }).join('');
+        }
+
+        // Build full QC metrics table
+        let qcFullHtml = '';
+        if (qcSamples.length > 0) {
+          qcFullHtml = qcSamples.map(s => {
+            const rows = (s.metrics || []).filter(m => m.value != null).map(m =>
+              `<tr><td style="padding:2px 8px;border:1px solid #e5e7eb;color:#6b7280;">${esc(m.category)}</td>
+              <td style="padding:2px 8px;border:1px solid #e5e7eb;">${esc(m.label)}</td>
+              <td style="padding:2px 8px;border:1px solid #e5e7eb;text-align:right;">${esc(m.format === 'pct' || m.format === 'pct_raw' ? fmtPct(m.value) : m.format === 'int' ? fmtInt(m.value) : fmt(m.value))}</td></tr>`
+            ).join('');
+            return `<h4 style="margin:16px 0 8px;color:#374151;">${esc(s.label)} ${s.run_dir ? '(' + esc(s.run_dir) + ')' : ''}</h4>
+              <table style="border-collapse:collapse;width:100%;font-size:13px;"><thead><tr>
+              <th style="padding:4px 8px;border:1px solid #e5e7eb;background:#f9fafb;text-align:left;">Category</th>
+              <th style="padding:4px 8px;border:1px solid #e5e7eb;background:#f9fafb;text-align:left;">Metric</th>
+              <th style="padding:4px 8px;border:1px solid #e5e7eb;background:#f9fafb;text-align:right;">Value</th>
+              </tr></thead><tbody>${rows}</tbody></table>`;
+          }).join('');
+        }
+
+        // Build QC files section for full report
+        let qcFilesHtml = '';
+        if (!isClinical) {
+          const funnelPlots = (qcFiles.funnel_plots || []).filter(f => f.path);
+          const cnvkitFiles = (qcFiles.cnvkit || []).filter(f => f.path);
+          const otherPdfs = (qcFiles.other_pdfs || []).filter(f => f.path);
+          if (funnelPlots.length || cnvkitFiles.length || otherPdfs.length) {
+            qcFilesHtml = '<h3 style="margin:24px 0 12px;color:#1f2937;">QC Figures</h3>';
+            funnelPlots.forEach(f => {
+              const url = getQcFileUrl(f.path);
+              qcFilesHtml += `<div style="margin-bottom:16px;">
+                <div style="font-size:12px;color:#6b7280;margin-bottom:4px;">${esc(f.tool.replace('lenstools_','').replace('_funnel',''))} — ${esc(f.run_dir)}</div>
+                <iframe src="${url}" style="width:100%;height:400px;border:1px solid #e5e7eb;border-radius:4px;"></iframe></div>`;
+            });
+            cnvkitFiles.forEach(f => {
+              const url = getQcFileUrl(f.path);
+              qcFilesHtml += `<div style="margin-bottom:16px;">
+                <div style="font-size:12px;color:#6b7280;margin-bottom:4px;">CNVkit ${esc(f.tool.replace('cnvkit_',''))} — ${esc(f.run_dir)}</div>
+                <iframe src="${url}" style="width:100%;height:400px;border:1px solid #e5e7eb;border-radius:4px;"></iframe></div>`;
+            });
+            otherPdfs.forEach(f => {
+              const url = getQcFileUrl(f.path);
+              qcFilesHtml += `<div style="margin-bottom:16px;">
+                <div style="font-size:12px;color:#6b7280;margin-bottom:4px;">${esc(f.tool)} — ${esc(f.run_dir)}</div>
+                <iframe src="${url}" style="width:100%;height:400px;border:1px solid #e5e7eb;border-radius:4px;"></iframe></div>`;
+            });
+          }
+        }
+
+        // pMHC table
+        const displayData = isClinical ? topData : sorted;
+        const tableRows = displayData.map((row, i) => {
+          const comment = comments[`${row.peptide}-${row.allele}`] || '';
+          if (isClinical) {
+            return `<tr style="background:${i % 2 === 0 ? '#f9fafb' : '#fff'}">
+              <td style="padding:6px 10px;border:1px solid #e5e7eb;text-align:center;font-weight:600;">${i+1}</td>
+              <td style="padding:6px 10px;border:1px solid #e5e7eb;font-family:monospace;font-weight:600;">${esc(row.peptide)}</td>
+              <td style="padding:6px 10px;border:1px solid #e5e7eb;">${esc(row.allele)}</td>
+              <td style="padding:6px 10px;border:1px solid #e5e7eb;text-align:right;font-weight:600;">${fmt(row[sortMetric], 3)}</td>
+              <td style="padding:6px 10px;border:1px solid #e5e7eb;text-align:right;">${fmt(row.mhcflurry_2_1_1_aff || row['mhcflurry_2.1.1.aff'])}</td>
+              <td style="padding:6px 10px;border:1px solid #e5e7eb;text-align:right;">${fmt(row.ccf)}</td>
+              <td style="padding:6px 10px;border:1px solid #e5e7eb;text-align:right;">${fmt(row.vaf)}</td>
+              <td style="padding:6px 10px;border:1px solid #e5e7eb;text-align:right;">${fmt(row.tpm)}</td>
+              <td style="padding:6px 10px;border:1px solid #e5e7eb;">${esc(row.antigen_source)}</td>
+              <td style="padding:6px 10px;border:1px solid #e5e7eb;font-style:italic;color:#6b7280;">${esc(comment)}</td>
+            </tr>`;
+          }
+          return `<tr style="background:${i % 2 === 0 ? '#f9fafb' : '#fff'}">
+            <td style="padding:4px 8px;border:1px solid #e5e7eb;text-align:center;">${i+1}</td>
+            <td style="padding:4px 8px;border:1px solid #e5e7eb;font-family:monospace;">${esc(row.peptide)}</td>
+            <td style="padding:4px 8px;border:1px solid #e5e7eb;">${esc(row.allele)}</td>
+            <td style="padding:4px 8px;border:1px solid #e5e7eb;text-align:right;font-weight:600;">${fmt(row[sortMetric], 3)}</td>
+            <td style="padding:4px 8px;border:1px solid #e5e7eb;text-align:right;">${fmt(row.mhcflurry_2_1_1_aff || row['mhcflurry_2.1.1.aff'])}</td>
+            <td style="padding:4px 8px;border:1px solid #e5e7eb;text-align:right;">${fmt(row.ccf)}</td>
+            <td style="padding:4px 8px;border:1px solid #e5e7eb;text-align:right;">${fmt(row.vaf)}</td>
+            <td style="padding:4px 8px;border:1px solid #e5e7eb;text-align:right;">${fmt(row.tpm)}</td>
+            <td style="padding:4px 8px;border:1px solid #e5e7eb;">${esc(row.antigen_source)}</td>
+            <td style="padding:4px 8px;border:1px solid #e5e7eb;font-style:italic;color:#6b7280;">${esc(comment)}</td>
+          </tr>`;
+        }).join('');
+
+        const title = isClinical ? 'LENS Clinical Summary' : 'LENS Full Report';
+        const subtitle = isClinical
+          ? 'Top neoantigen candidates for review'
+          : 'Complete neoantigen report with QC metrics';
+        const alleles = [...patient.alleles].sort().join(', ') || 'N/A';
+        const sources = [...patient.antigenSources].sort().join(', ') || 'N/A';
+
+        const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>${title} — ${esc(selectedPatient)}</title>
+          <style>
+            @media print { body { padding: 0; } @page { margin: 0.75in; } }
+            body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; color: #1f2937; max-width: 11in; margin: 0 auto; padding: 24px; }
+            h1 { font-size: 22px; margin: 0 0 4px; } h2 { font-size: 18px; margin: 20px 0 8px; color: #374151; }
+            h3 { font-size: 15px; margin: 16px 0 8px; color: #374151; } h4 { font-size: 13px; }
+            table { border-collapse: collapse; width: 100%; font-size: ${isClinical ? '13px' : '12px'}; }
+            th { background: #f3f4f6; font-weight: 600; text-align: left; }
+            .meta { color: #6b7280; font-size: 13px; } .label { font-weight: 600; color: #374151; }
+          </style></head><body>
+          <div style="border-bottom:2px solid #4f46e5;padding-bottom:12px;margin-bottom:16px;">
+            <h1>${title}</h1>
+            <div class="meta">${subtitle}</div>
+          </div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:20px;">
+            <div><span class="label">Patient:</span> ${esc(selectedPatient)}</div>
+            <div><span class="label">Date:</span> ${dateStr}</div>
+            <div><span class="label">MHC Alleles:</span> ${esc(alleles)}</div>
+            <div><span class="label">Antigen Sources:</span> ${esc(sources)}</div>
+            <div><span class="label">Total pMHCs:</span> ${allData.length}</div>
+            <div><span class="label">Sort Metric:</span> ${esc(sortMetric)}</div>
+          </div>
+          ${qcHighlightsHtml ? `<h3>Sequencing QC Summary</h3>
+            <table><thead><tr>
+              <th style="padding:4px 8px;border:1px solid #e5e7eb;">Sample</th>
+              <th style="padding:4px 8px;border:1px solid #e5e7eb;text-align:right;">Total Reads</th>
+              <th style="padding:4px 8px;border:1px solid #e5e7eb;text-align:right;">Q30 Rate</th>
+              <th style="padding:4px 8px;border:1px solid #e5e7eb;text-align:right;">Duplication</th>
+              <th style="padding:4px 8px;border:1px solid #e5e7eb;text-align:right;">Uniquely Mapped</th>
+            </tr></thead><tbody>${qcHighlightsHtml}</tbody></table>` : ''}
+          <h2>Top Neoantigen Candidates ${isClinical ? `(Top ${displayData.length})` : `(${displayData.length} total)`}</h2>
+          <table><thead><tr>
+            <th style="padding:${isClinical ? '6px 10px' : '4px 8px'};border:1px solid #e5e7eb;text-align:center;width:36px;">#</th>
+            <th style="padding:${isClinical ? '6px 10px' : '4px 8px'};border:1px solid #e5e7eb;">Peptide</th>
+            <th style="padding:${isClinical ? '6px 10px' : '4px 8px'};border:1px solid #e5e7eb;">Allele</th>
+            <th style="padding:${isClinical ? '6px 10px' : '4px 8px'};border:1px solid #e5e7eb;text-align:right;">Priority</th>
+            <th style="padding:${isClinical ? '6px 10px' : '4px 8px'};border:1px solid #e5e7eb;text-align:right;">MHCFlurry</th>
+            <th style="padding:${isClinical ? '6px 10px' : '4px 8px'};border:1px solid #e5e7eb;text-align:right;">CCF</th>
+            <th style="padding:${isClinical ? '6px 10px' : '4px 8px'};border:1px solid #e5e7eb;text-align:right;">VAF</th>
+            <th style="padding:${isClinical ? '6px 10px' : '4px 8px'};border:1px solid #e5e7eb;text-align:right;">TPM</th>
+            <th style="padding:${isClinical ? '6px 10px' : '4px 8px'};border:1px solid #e5e7eb;">Source</th>
+            <th style="padding:${isClinical ? '6px 10px' : '4px 8px'};border:1px solid #e5e7eb;">Notes</th>
+          </tr></thead><tbody>${tableRows}</tbody></table>
+          ${!isClinical && qcFullHtml ? '<h2>Detailed QC Metrics</h2>' + qcFullHtml : ''}
+          ${qcFilesHtml}
+          <div style="margin-top:24px;padding-top:8px;border-top:1px solid #e5e7eb;font-size:11px;color:#9ca3af;">
+            Generated by LENS Report Viewer on ${new Date().toISOString()}
+          </div>
+        </body></html>`;
+
+        const blob = new Blob([html], { type: 'text/html' });
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;
-        a.download = `lens_report_${selectedPatient}_${new Date().toISOString().split('T')[0]}.json`;
+        a.download = `${isClinical ? 'lens_clinical_summary' : 'lens_full_report'}_${selectedPatient}_${dateStr}.html`;
         a.click();
+        URL.revokeObjectURL(url);
       };
 
       // Upload screen — also show when bundle patient selector is active
@@ -2416,7 +2575,6 @@ HLA-C*08:02	EICHTVYYQ	Indel	NPM1	11	94024257	94024259	TA	GGGT	indel	TA>GGGT	p.M1
         }
         return (
           <div className="min-h-screen bg-gray-50 p-4 md:p-6">
-            <Header reportTemplate={reportTemplate} />
             <div className="max-w-3xl mx-auto mt-12">
               <div className="bg-white rounded-lg shadow-md p-8 text-center border-2 border-dashed border-gray-300">
                 {uploadContent}
@@ -2429,7 +2587,6 @@ HLA-C*08:02	EICHTVYYQ	Indel	NPM1	11	94024257	94024259	TA	GGGT	indel	TA>GGGT	p.M1
       // Main interface
       return (
         <div className="h-screen flex flex-col bg-gray-50">
-          <Header reportTemplate={reportTemplate} />
           <div className="flex flex-1 min-h-0">
             {/* Sidebar */}
             <Sidebar
@@ -2668,14 +2825,6 @@ HLA-C*08:02	EICHTVYYQ	Indel	NPM1	11	94024257	94024259	TA	GGGT	indel	TA>GGGT	p.M1
         </div>
       );
     };
-
-    // Header Component
-    const Header = ({ reportTemplate }) => (
-      <div className="bg-white border-b border-gray-200 px-4 md:px-6 py-4 shadow-sm">
-        <h1 className="text-2xl md:text-3xl font-bold text-gray-900 mb-1">{reportTemplate?.name || 'RAFT Results Viewer'}</h1>
-        <p className="text-sm text-gray-600">{reportTemplate?.description || 'Review workflow reports, patient-level results, and QC summaries.'}</p>
-      </div>
-    );
 
     // Sidebar Component
     const Sidebar = ({ patients, selectedPatient, setSelectedPatient, setSelectedAlleles, setSelectedAntigenSources, sidebarCollapsed, setSidebarCollapsed, viewMode, setViewMode, qcData, selectedGroup, setSelectedGroup, orderedGroups, setOrderedGroups, setPatientTab, defaultReportSectionId }) => {
@@ -3093,11 +3242,18 @@ HLA-C*08:02	EICHTVYYQ	Indel	NPM1	11	94024257	94024259	TA	GGGT	indel	TA>GGGT	p.M1
               {showDataTable ? 'Hide' : 'Show'} Data Table
             </button>
             <button
-              onClick={generateReport}
+              onClick={() => generateReport('clinical')}
               className="px-4 py-2 bg-green-600 text-white rounded-md cursor-pointer text-sm font-medium flex items-center gap-2 hover:bg-green-700 transition"
             >
-              <Icon name="download" size={16} />
-              Export Report
+              <Icon name="file-text" size={16} />
+              Clinical Summary
+            </button>
+            <button
+              onClick={() => generateReport('full')}
+              className="px-4 py-2 bg-indigo-600 text-white rounded-md cursor-pointer text-sm font-medium flex items-center gap-2 hover:bg-indigo-700 transition"
+            >
+              <Icon name="file-down" size={16} />
+              Full Report
             </button>
           </div>
         </div>
