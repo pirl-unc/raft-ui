@@ -1216,6 +1216,7 @@ HLA-C*08:02	EICHTVYYQ	Indel	NPM1	11	94024257	94024259	TA	GGGT	indel	TA>GGGT	p.M1
       const [bundleStatus, setBundleStatus] = useState('');
       const [bundleEntries, setBundleEntries] = useState(null); // {name: Uint8Array} raw tar entries kept for phase 2
       const [bundlePatients, setBundlePatients] = useState(null); // [{id, files, sizeMB}] for patient selection
+      const [availableBundlePatients, setAvailableBundlePatients] = useState(null); // [patientId, ...] for lazy-load sidebar
       const [mobileView, setMobileView] = useState('visualizations'); // 'visualizations' or 'pmhcs'
       const [patientTab, setPatientTab] = useState('report');
       const [reportTemplate, setReportTemplate] = useState(DEFAULT_REPORT_TEMPLATE);
@@ -1444,7 +1445,7 @@ HLA-C*08:02	EICHTVYYQ	Indel	NPM1	11	94024257	94024259	TA	GGGT	indel	TA>GGGT	p.M1
         const entries = decodeTarEntries(bytes);
         const entryNames = Object.keys(entries);
         const entryCount = entryNames.length;
-        console.log('[RAFT bundle] Decoded entries:', entryCount, entryNames.slice(0, 10));
+        console.log('[RAFT bundle] Decoded entries:', entryCount);
         const textDecoder = new TextDecoder();
         let bundleManifestData = null;
         let bundleQcData = null;
@@ -1475,7 +1476,7 @@ HLA-C*08:02	EICHTVYYQ	Indel	NPM1	11	94024257	94024259	TA	GGGT	indel	TA>GGGT	p.M1
           tsvEntries.push({ name, size: content.byteLength });
           totalSizeBytes += content.byteLength;
         }
-        console.log('[RAFT bundle] TSV entries found:', tsvEntries.length, 'totalSize:', totalSizeBytes, 'hasQc:', !!bundleQcData, 'hasManifest:', !!bundleManifestData, 'hasTemplate:', !!bundleReportTemplate, 'templateRenderer:', bundleReportTemplate?.sections?.[0]?.renderer);
+        console.log('[RAFT bundle] TSV entries:', tsvEntries.length, 'hasQc:', !!bundleQcData, 'hasTemplate:', !!bundleReportTemplate);
         if (bundleManifestData) setManifestData(bundleManifestData);
         if (bundleQcData) setQcData(bundleQcData);
         if (bundleReportTemplate) setReportTemplate(normalizeReportTemplate(bundleReportTemplate));
@@ -1490,7 +1491,7 @@ HLA-C*08:02	EICHTVYYQ	Indel	NPM1	11	94024257	94024259	TA	GGGT	indel	TA>GGGT	p.M1
           patientMap[pid].sizeBytes += entry.size;
         }
         const patientList = Object.values(patientMap).sort((a, b) => a.id.localeCompare(b.id));
-        console.log('[RAFT bundle] Patient list:', patientList.length, patientList.map(p => p.id));
+        console.log('[RAFT bundle] Patient list:', patientList.length);
 
         if (patientList.length === 0 && !bundleQcData && !bundleReportTemplate) {
           throw new Error('Bundle did not contain report files, QC data, or a report UI template.');
@@ -1498,7 +1499,6 @@ HLA-C*08:02	EICHTVYYQ	Indel	NPM1	11	94024257	94024259	TA	GGGT	indel	TA>GGGT	p.M1
 
         // If only one patient, skip selection and load directly
         if (patientList.length <= 1) {
-          console.log('[RAFT bundle] Single patient or QC-only, loading directly');
           setBundleStatus(patientList.length === 1
             ? `Loading 1 patient (${(totalSizeBytes / (1024 * 1024)).toFixed(1)} MB of data)...`
             : 'Loading QC data...');
@@ -1530,7 +1530,6 @@ HLA-C*08:02	EICHTVYYQ	Indel	NPM1	11	94024257	94024259	TA	GGGT	indel	TA>GGGT	p.M1
         }
 
         // Multiple patients: show selection UI, keep raw entries for phase 2
-        console.log('[RAFT bundle] Multiple patients, showing selector');
         setBundleEntries(entries);
         setBundlePatients(patientList);
         setBundleStatus(`Found ${patientList.length} patients in bundle. Select which to load.`);
@@ -1544,7 +1543,8 @@ HLA-C*08:02	EICHTVYYQ	Indel	NPM1	11	94024257	94024259	TA	GGGT	indel	TA>GGGT	p.M1
         const entries = bundleEntries;
         const bundleQcFiles = {};
         const filesMap = {};
-        // Load TSV files for selected patients
+        const firstPid = selectedPatientIds[0];
+        // Lazy-load: only decode the first selected patient's TSV data
         for (const [name, content] of Object.entries(entries)) {
           const basename = name.split('/').pop();
           if (basename === 'raft-report-bundle.json' || basename === 'manifest-groups.json' ||
@@ -1554,7 +1554,7 @@ HLA-C*08:02	EICHTVYYQ	Indel	NPM1	11	94024257	94024259	TA	GGGT	indel	TA>GGGT	p.M1
           if (name.startsWith('qc/')) { bundleQcFiles[name] = content; continue; }
           if (!name.match(/\.(tsv|txt)$/i)) continue;
           const pid = inferPatientIdFromFilename(name, manifestData);
-          if (selectedPatientIds.includes(pid)) {
+          if (pid === firstPid) {
             filesMap[name] = textDecoder.decode(content);
           }
         }
@@ -1567,7 +1567,10 @@ HLA-C*08:02	EICHTVYYQ	Indel	NPM1	11	94024257	94024259	TA	GGGT	indel	TA>GGGT	p.M1
           setReportFiles({});
           setPatients({});
         }
-        setBundlePatients(null); // Hide selection UI
+        // Store available patient IDs for sidebar navigation (lazy-load on click)
+        setAvailableBundlePatients(selectedPatientIds);
+        setSelectedPatient(firstPid);
+        setBundlePatients(null); // Hide selection UI, keep bundleEntries for lazy loading
         setIsPreloading(false);
       };
 
@@ -2219,19 +2222,20 @@ HLA-C*08:02	EICHTVYYQ	Indel	NPM1	11	94024257	94024259	TA	GGGT	indel	TA>GGGT	p.M1
       }, [patients]);
 
       const viewerPatients = useMemo(() => {
-        if (Object.keys(patients).length > 0) return patients;
+        const merged = {};
+        // QC data provides patient IDs even when no report data is loaded
         const qcPatientIds = Object.keys(qcData?.summaries || qcData?.patients || {}).sort();
-        return Object.fromEntries(qcPatientIds.map(id => [id, {
-          id,
-          isMultiGroup: false,
-          groups: ['default'],
-          files: [],
-          data: [],
-          alleles: new Set(),
-          alleleSupport: {},
-          antigenSources: new Set()
-        }]));
-      }, [patients, qcData]);
+        qcPatientIds.forEach(id => {
+          merged[id] = patients[id] || { id, isMultiGroup: false, groups: ['default'], files: [], data: [], alleles: new Set(), alleleSupport: {}, antigenSources: new Set(), _loading: true };
+        });
+        // Loaded patients override stubs
+        Object.keys(patients).forEach(id => { merged[id] = patients[id]; });
+        // Bundle patient IDs (from Phase 1 scan) fill any gaps
+        (bundlePatients || []).forEach(p => {
+          if (!merged[p.id]) merged[p.id] = { id: p.id, isMultiGroup: false, groups: ['default'], files: [], data: [], alleles: new Set(), alleleSupport: {}, antigenSources: new Set(), _loading: true };
+        });
+        return merged;
+      }, [patients, qcData, bundlePatients]);
 
       const reportSections = useMemo(() => {
         return normalizeReportTemplate(reportTemplate).sections;
@@ -2266,6 +2270,54 @@ HLA-C*08:02	EICHTVYYQ	Indel	NPM1	11	94024257	94024259	TA	GGGT	indel	TA>GGGT	p.M1
         if (selectedPatient || Object.keys(viewerPatients).length === 0) return;
         setSelectedPatient(Object.keys(viewerPatients).sort()[0]);
       }, [viewerPatients, selectedPatient]);
+
+      // Lazy-load: when user selects a different patient, decode just that patient's data
+      useEffect(() => {
+        if (!selectedPatient || !bundleEntries) return;
+        if (patients[selectedPatient]) return; // already loaded
+        const textDecoder = new TextDecoder();
+        const filesMap = {};
+        for (const [name, content] of Object.entries(bundleEntries)) {
+          const basename = name.split('/').pop();
+          if (basename === 'raft-report-bundle.json' || basename === 'manifest-groups.json' ||
+              basename === 'qc-data.json' || basename === 'report-ui.json' || basename.match(/\.report-ui\.json$/)) {
+            continue;
+          }
+          if (name.startsWith('qc/')) continue;
+          if (!name.match(/\.(tsv|txt)$/i)) continue;
+          const pid = inferPatientIdFromFilename(name, manifestData);
+          if (pid === selectedPatient) {
+            filesMap[name] = textDecoder.decode(content);
+          }
+        }
+        if (Object.keys(filesMap).length === 0) return;
+        // Parse this patient's data and replace patients state (evict previous)
+        let parsed = {};
+        const nextReportFiles = {};
+        for (const [filename, content] of Object.entries(filesMap)) {
+          const rows = parseDelimitedRows(filename, content);
+          nextReportFiles[filename] = { name: filename, basename: filename.split('/').pop(), content, rows };
+          parsed = parseFileContent(filename, content, parsed, manifestData);
+        }
+        setPatients(parsed);
+        setReportFiles(nextReportFiles);
+        // Set allele/source selections for the new patient
+        const patient = parsed[selectedPatient];
+        if (patient) {
+          if (patient.isMultiGroup && patient.groups.length > 0) {
+            setSelectedGroup(patient.groups[0]);
+            const groupData = patient.groupData[patient.groups[0]];
+            if (groupData) {
+              setSelectedAlleles(new Set(groupData.alleles));
+              setSelectedAntigenSources(new Set(groupData.antigenSources));
+            }
+          } else {
+            setSelectedGroup(null);
+            setSelectedAlleles(new Set(patient.alleles));
+            setSelectedAntigenSources(new Set(patient.antigenSources));
+          }
+        }
+      }, [selectedPatient]);
 
       const toggleAllele = (allele) => {
         const newSet = new Set(selectedAlleles);
@@ -2690,6 +2742,7 @@ HLA-C*08:02	EICHTVYYQ	Indel	NPM1	11	94024257	94024259	TA	GGGT	indel	TA>GGGT	p.M1
         setSelectedPatient(patientId);
         setPatientTab(defaultReportSectionId);
         const patient = patients[patientId];
+        if (!patient || patient._loading) return; // data will load via useEffect
         if (patient.isMultiGroup && patient.groups.length > 0) {
           // Auto-select first group for multi-group patients
           setSelectedGroup(patient.groups[0]);
@@ -2776,6 +2829,7 @@ HLA-C*08:02	EICHTVYYQ	Indel	NPM1	11	94024257	94024259	TA	GGGT	indel	TA>GGGT	p.M1
             {Object.keys(patients).sort().map(patientId => {
               const patient = patients[patientId];
               const isSelected = selectedPatient === patientId && viewMode === 'patient';
+              const isLoaded = patient && !patient._loading && patient.data && patient.data.length > 0;
               return (
                 <div key={patientId} className="mb-2">
                   <button
@@ -2788,14 +2842,16 @@ HLA-C*08:02	EICHTVYYQ	Indel	NPM1	11	94024257	94024259	TA	GGGT	indel	TA>GGGT	p.M1
                   >
                     <div className="flex items-center justify-between">
                       <div className="text-sm font-semibold mb-0.5">{patientId}</div>
-                      {patient.isMultiGroup && (
+                      {patient?.isMultiGroup && (
                         <span className={`text-xs px-1.5 py-0.5 rounded ${isSelected ? 'bg-indigo-500' : 'bg-purple-100 text-purple-700'}`}>
                           {patient.groups.length} groups
                         </span>
                       )}
                     </div>
                     <div className={`text-xs ${isSelected ? 'text-indigo-200' : 'text-gray-500'}`}>
-                      {patient.data.length} pMHCs &bull; {patient.alleles.size} MHC alleles
+                      {isLoaded
+                        ? `${patient.data.length} pMHCs \u2022 ${patient.alleles.size} MHC alleles`
+                        : 'Click to load'}
                     </div>
                   </button>
 
