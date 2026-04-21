@@ -1217,6 +1217,7 @@ HLA-C*08:02	EICHTVYYQ	Indel	NPM1	11	94024257	94024259	TA	GGGT	indel	TA>GGGT	p.M1
       const [bundleEntries, setBundleEntries] = useState(null); // {name: Uint8Array} raw tar entries kept for phase 2
       const [bundlePatients, setBundlePatients] = useState(null); // [{id, files, sizeMB}] for patient selection
       const [availableBundlePatients, setAvailableBundlePatients] = useState(null); // [patientId, ...] for lazy-load sidebar
+      const [bundlePatientMeta, setBundlePatientMeta] = useState(null); // {pid: {pmhcCount, alleles}}
       const [mobileView, setMobileView] = useState('visualizations'); // 'visualizations' or 'pmhcs'
       const [patientTab, setPatientTab] = useState('report');
       const [reportTemplate, setReportTemplate] = useState(DEFAULT_REPORT_TEMPLATE);
@@ -1438,6 +1439,41 @@ HLA-C*08:02	EICHTVYYQ	Indel	NPM1	11	94024257	94024259	TA	GGGT	indel	TA>GGGT	p.M1
         return new Uint8Array(buffer);
       };
 
+      // Lightweight TSV scan: count rows and extract allele values without full parse
+      const quickScanTsv = (content) => {
+        // Find first newline (end of header)
+        let headerEnd = 0;
+        while (headerEnd < content.length && content[headerEnd] !== 10) headerEnd++;
+        if (headerEnd >= content.length) return { pmhcCount: 0, alleles: new Set() };
+        const headerLine = new TextDecoder().decode(content.slice(0, headerEnd));
+        const headers = headerLine.split('\t');
+        const alleleIdx = headers.findIndex(h => h === 'allele' || h === 'HLA_allele' || h === 'mhc_allele');
+        // Count remaining newlines for pMHC count and extract allele column
+        let pmhcCount = 0;
+        const alleles = new Set();
+        let rowStart = headerEnd + 1;
+        for (let i = headerEnd + 1; i <= content.length; i++) {
+          if (i === content.length || content[i] === 10) {
+            pmhcCount++;
+            if (alleleIdx >= 0 && i > rowStart) {
+              // Find the allele column in this row
+              let col = 0, colStart = rowStart;
+              for (let j = rowStart; j < i && col < alleleIdx; j++) {
+                if (content[j] === 9) { col++; colStart = j + 1; } // tab
+              }
+              if (col === alleleIdx) {
+                let colEnd = colStart;
+                while (colEnd < i && content[colEnd] !== 9) colEnd++;
+                const val = new TextDecoder().decode(content.slice(colStart, colEnd)).trim();
+                if (val && val !== 'NA' && val !== 'N/A') alleles.add(val);
+              }
+            }
+            rowStart = i + 1;
+          }
+        }
+        return { pmhcCount: Math.max(0, pmhcCount - (content[content.length - 1] === 10 ? 1 : 0)), alleles };
+      };
+
       const loadTarBundle = async (arrayBuffer) => {
         setBundleStatus('Decompressing bundle...');
         const bytes = await maybeGunzip(new Uint8Array(arrayBuffer));
@@ -1473,7 +1509,8 @@ HLA-C*08:02	EICHTVYYQ	Indel	NPM1	11	94024257	94024259	TA	GGGT	indel	TA>GGGT	p.M1
             continue;
           }
           if (!name.match(/\.(tsv|txt)$/i)) continue;
-          tsvEntries.push({ name, size: content.byteLength });
+          const scan = quickScanTsv(content);
+          tsvEntries.push({ name, size: content.byteLength, pmhcCount: scan.pmhcCount, alleles: scan.alleles });
           totalSizeBytes += content.byteLength;
         }
         console.log('[RAFT bundle] TSV entries:', tsvEntries.length, 'hasQc:', !!bundleQcData, 'hasTemplate:', !!bundleReportTemplate);
@@ -1486,9 +1523,11 @@ HLA-C*08:02	EICHTVYYQ	Indel	NPM1	11	94024257	94024259	TA	GGGT	indel	TA>GGGT	p.M1
         const manifestPatients = bundleManifestData ? Object.keys(bundleManifestData.patients || {}) : [];
         for (const entry of tsvEntries) {
           const pid = inferPatientIdFromFilename(entry.name, bundleManifestData);
-          if (!patientMap[pid]) patientMap[pid] = { id: pid, files: [], sizeBytes: 0 };
+          if (!patientMap[pid]) patientMap[pid] = { id: pid, files: [], sizeBytes: 0, pmhcCount: 0, alleles: new Set() };
           patientMap[pid].files.push(entry.name);
           patientMap[pid].sizeBytes += entry.size;
+          patientMap[pid].pmhcCount += entry.pmhcCount;
+          entry.alleles.forEach(a => patientMap[pid].alleles.add(a));
         }
         const patientList = Object.values(patientMap).sort((a, b) => a.id.localeCompare(b.id));
         console.log('[RAFT bundle] Patient list:', patientList.length);
@@ -1532,6 +1571,9 @@ HLA-C*08:02	EICHTVYYQ	Indel	NPM1	11	94024257	94024259	TA	GGGT	indel	TA>GGGT	p.M1
         // Multiple patients: show selection UI, keep raw entries for phase 2
         setBundleEntries(entries);
         setBundlePatients(patientList);
+        const metaMap = {};
+        patientList.forEach(p => { metaMap[p.id] = { pmhcCount: p.pmhcCount, alleles: p.alleles }; });
+        setBundlePatientMeta(metaMap);
         setBundleStatus(`Found ${patientList.length} patients in bundle. Select which to load.`);
         setIsPreloading(false);
       };
@@ -2230,12 +2272,26 @@ HLA-C*08:02	EICHTVYYQ	Indel	NPM1	11	94024257	94024259	TA	GGGT	indel	TA>GGGT	p.M1
         });
         // Loaded patients override stubs
         Object.keys(patients).forEach(id => { merged[id] = patients[id]; });
-        // Bundle patient IDs (from Phase 1 scan) fill any gaps
+        // Bundle patient IDs (from Phase 1 scan) fill any gaps with pMHC/allele metadata
         (bundlePatients || []).forEach(p => {
-          if (!merged[p.id]) merged[p.id] = { id: p.id, isMultiGroup: false, groups: ['default'], files: [], data: [], alleles: new Set(), alleleSupport: {}, antigenSources: new Set(), _loading: true };
+          if (!merged[p.id]) {
+            const meta = bundlePatientMeta?.[p.id];
+            merged[p.id] = {
+              id: p.id, isMultiGroup: false, groups: ['default'], files: [], data: [],
+              alleles: meta?.alleles || new Set(), alleleSupport: {}, antigenSources: new Set(),
+              _loading: true,
+              _pmhcCount: meta?.pmhcCount || 0
+            };
+          } else if (merged[p.id]._loading) {
+            // Fill in metadata for unloaded QC-only stubs
+            const meta = bundlePatientMeta?.[p.id];
+            if (meta) {
+              merged[p.id] = { ...merged[p.id], alleles: meta.alleles || merged[p.id].alleles, _pmhcCount: meta.pmhcCount || 0 };
+            }
+          }
         });
         return merged;
-      }, [patients, qcData, bundlePatients]);
+      }, [patients, qcData, bundlePatients, bundlePatientMeta]);
 
       const reportSections = useMemo(() => {
         return normalizeReportTemplate(reportTemplate).sections;
@@ -2851,7 +2907,9 @@ HLA-C*08:02	EICHTVYYQ	Indel	NPM1	11	94024257	94024259	TA	GGGT	indel	TA>GGGT	p.M1
                     <div className={`text-xs ${isSelected ? 'text-indigo-200' : 'text-gray-500'}`}>
                       {isLoaded
                         ? `${patient.data.length} pMHCs \u2022 ${patient.alleles.size} MHC alleles`
-                        : 'Click to load'}
+                        : patient._pmhcCount
+                          ? `${patient._pmhcCount} pMHCs \u2022 ${patient.alleles.size} MHC alleles`
+                          : 'Click to load'}
                     </div>
                   </button>
 
