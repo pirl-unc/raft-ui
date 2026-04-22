@@ -9,6 +9,7 @@
   <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
   <script src="https://unpkg.com/d3@7/dist/d3.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
   <script src="https://unpkg.com/lucide@0.263.0/dist/umd/lucide.min.js"></script>
   <style>
     @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
@@ -1203,8 +1204,13 @@ HLA-C*08:02	EICHTVYYQ	Indel	NPM1	11	94024257	94024259	TA	GGGT	indel	TA>GGGT	p.M1
       const [sortMetric, setSortMetric] = useState('priority_score_maximum');
       const [selectedAlleles, setSelectedAlleles] = useState(new Set());
       const [selectedAntigenSources, setSelectedAntigenSources] = useState(new Set());
-      const [comments, setComments] = useState({});
+      const [patientComments, setPatientComments] = useState({});
+      const comments = patientComments[selectedPatient] || {};
+      const setComments = (newComments) => {
+        setPatientComments(prev => ({ ...prev, [selectedPatient]: typeof newComments === 'function' ? newComments(prev[selectedPatient] || {}) : newComments }));
+      };
       const [showDataTable, setShowDataTable] = useState(false);
+      const [topNOnlyViz, setTopNOnlyViz] = useState(false);
       const [selectedRow, setSelectedRow] = useState(null);
       const [showAlleleTable, setShowAlleleTable] = useState(true);
       const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
@@ -2186,6 +2192,27 @@ HLA-C*08:02	EICHTVYYQ	Indel	NPM1	11	94024257	94024259	TA	GGGT	indel	TA>GGGT	p.M1
         return data.slice(0, getActiveTopN());
       }, [selectedPatient, patients, selectedGroup, selectedAlleles, selectedAntigenSources, sortMetric, topN, globalFormula, patientFormulas, patientTopN, patientSortMetrics]);
 
+      // Group currentPatientData by peptide+allele to collapse duplicate genomic origins
+      const groupedPatientData = useMemo(() => {
+        const groups = {};
+        for (const row of currentPatientData) {
+          const key = `${row.peptide}-${row.allele}`;
+          if (!groups[key]) groups[key] = [];
+          groups[key].push(row);
+        }
+        const numericFields = ['priority_score_maximum', 'priority_score_mhcflurry', 'priority_score_netmhcpan', 'mhcflurry_2.1.1.aff', 'mhcflurry_2.1.1.pres_score', 'netmhcpan_4.1.ba_score', 'netmhcpan_4.1.el_score', 'ccf', 'vaf', 'tpm', 'ic50', 'percentile_rank'];
+        return Object.values(groups).map(group => {
+          const isDuplicate = group.length > 1;
+          if (!isDuplicate) return { key: `${group[0].peptide}-${group[0].allele}`, isDuplicate: false, rows: group, avgRow: group[0] };
+          const avgRow = { ...group[0] };
+          for (const field of numericFields) {
+            const values = group.map(r => parseFloat(r[field])).filter(v => !isNaN(v));
+            if (values.length > 0) avgRow[field] = (values.reduce((a, b) => a + b, 0) / values.length).toString();
+          }
+          return { key: `${group[0].peptide}-${group[0].allele}`, isDuplicate: true, rows: group, avgRow };
+        });
+      }, [currentPatientData]);
+
       // Full filtered data (for visualizations)
       const fullPatientData = useMemo(() => {
         let data = getPatientDataSource();
@@ -2195,6 +2222,25 @@ HLA-C*08:02	EICHTVYYQ	Indel	NPM1	11	94024257	94024259	TA	GGGT	indel	TA>GGGT	p.M1
         const activeSortMetric = getActiveSortMetric();
         return [...data].sort((a, b) => (parseFloat(b[activeSortMetric]) || 0) - (parseFloat(a[activeSortMetric]) || 0));
       }, [selectedPatient, patients, selectedGroup, selectedAlleles, selectedAntigenSources, sortMetric, patientSortMetrics]);
+
+      // Peptides that have high-affinity binding to multiple HLA alleles
+      const multiAllelePeptides = useMemo(() => {
+        const peptideMap = {};
+        for (const row of fullPatientData) {
+          if (!row.peptide) continue;
+          if (!peptideMap[row.peptide]) peptideMap[row.peptide] = new Set();
+          const ic50 = parseFloat(row.ic50);
+          const rank = parseFloat(row.percentile_rank);
+          const isHighAffinity = (row.binding_level && row.binding_level.toLowerCase().includes('strong')) ||
+            (ic50 > 0 && ic50 < 500) || (rank > 0 && rank < 0.5);
+          if (isHighAffinity) peptideMap[row.peptide].add(row.allele);
+        }
+        return new Set(
+          Object.entries(peptideMap)
+            .filter(([_, alleles]) => alleles.size > 1)
+            .map(([peptide]) => peptide)
+        );
+      }, [fullPatientData]);
 
       // All patients data
       const allPatientsData = useMemo(() => {
@@ -2448,7 +2494,7 @@ HLA-C*08:02	EICHTVYYQ	Indel	NPM1	11	94024257	94024259	TA	GGGT	indel	TA>GGGT	p.M1
           </tr>`;
         }).join('');
 
-        const title = isClinical ? 'LENS Clinical Summary' : 'LENS Full Report';
+        const title = isClinical ? 'LENS One-page Report' : 'LENS Full Report';
         const subtitle = isClinical
           ? 'Top neoantigen candidates for review'
           : 'Complete neoantigen report with QC metrics';
@@ -2505,13 +2551,32 @@ HLA-C*08:02	EICHTVYYQ	Indel	NPM1	11	94024257	94024259	TA	GGGT	indel	TA>GGGT	p.M1
           </div>
         </body></html>`;
 
-        const blob = new Blob([html], { type: 'text/html' });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = `${isClinical ? 'lens_clinical_summary' : 'lens_full_report'}_${selectedPatient}_${dateStr}.html`;
-        a.click();
-        URL.revokeObjectURL(url);
+        const container = document.createElement('div');
+        container.innerHTML = html;
+        container.style.cssText = 'position:absolute;left:-9999px;top:0;width:11in;';
+        document.body.appendChild(container);
+
+        const filename = `${isClinical ? 'lens_one_page_report' : 'lens_full_report'}_${selectedPatient}_${dateStr}.pdf`;
+        html2pdf().set({
+          margin: [0.5, 0.5, 0.5, 0.5],
+          filename: filename,
+          image: { type: 'jpeg', quality: 0.98 },
+          html2canvas: { scale: 2, useCORS: true, logging: false },
+          jsPDF: { unit: 'in', format: 'letter', orientation: 'portrait' },
+          pagebreak: { mode: ['avoid-all', 'css', 'legacy'] }
+        }).from(container).save().then(() => {
+          document.body.removeChild(container);
+        }).catch((err) => {
+          console.error('PDF generation failed, falling back to HTML download:', err);
+          document.body.removeChild(container);
+          const blob = new Blob([html], { type: 'text/html' });
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = `${isClinical ? 'lens_one_page_report' : 'lens_full_report'}_${selectedPatient}_${dateStr}.html`;
+          a.click();
+          URL.revokeObjectURL(url);
+        });
       };
 
       // Upload screen — also show when bundle patient selector is active
@@ -2736,6 +2801,7 @@ HLA-C*08:02	EICHTVYYQ	Indel	NPM1	11	94024257	94024259	TA	GGGT	indel	TA>GGGT	p.M1
                         showDataTable={showDataTable} setShowDataTable={setShowDataTable}
                         generateReport={generateReport}
                         selectedGroup={selectedGroup}
+                        topNOnlyViz={topNOnlyViz} setTopNOnlyViz={setTopNOnlyViz}
                       />
                     </div>
                   )}
@@ -2771,6 +2837,7 @@ HLA-C*08:02	EICHTVYYQ	Indel	NPM1	11	94024257	94024259	TA	GGGT	indel	TA>GGGT	p.M1
                             setSelectedRow={setSelectedRow}
                             topN={getActiveTopN()}
                             selectedPatient={selectedPatient}
+                            topNOnlyViz={topNOnlyViz}
                           />
                         </div>
                       </div>
@@ -2800,6 +2867,8 @@ HLA-C*08:02	EICHTVYYQ	Indel	NPM1	11	94024257	94024259	TA	GGGT	indel	TA>GGGT	p.M1
                             hasCustomFormula={!!(getActiveFormula() && getActiveFormula().trim())}
                             tumorType={selectedTumorType}
                             tumorSubtype={selectedTumorSubtype}
+                            multiAllelePeptides={multiAllelePeptides}
+                            groupedData={groupedPatientData}
                           />
                         )}
                       </div>
@@ -3106,7 +3175,8 @@ HLA-C*08:02	EICHTVYYQ	Indel	NPM1	11	94024257	94024259	TA	GGGT	indel	TA>GGGT	p.M1
       selectedAntigenSources, toggleAntigenSource,
       selectedAlleles, toggleAllele,
       showAlleleTable, setShowAlleleTable,
-      showDataTable, setShowDataTable, generateReport
+      showDataTable, setShowDataTable, generateReport,
+      topNOnlyViz, setTopNOnlyViz
     }) => {
       const [controlsExpanded, setControlsExpanded] = useState(true);
 
@@ -3229,7 +3299,7 @@ HLA-C*08:02	EICHTVYYQ	Indel	NPM1	11	94024257	94024259	TA	GGGT	indel	TA>GGGT	p.M1
           )}
 
           {/* Action Buttons */}
-          <div className="flex gap-2 flex-wrap">
+          <div className="flex gap-2 flex-wrap justify-center">
             <button
               onClick={() => setShowDataTable(!showDataTable)}
               className={`px-4 py-2 rounded-md cursor-pointer text-sm font-medium flex items-center gap-2 transition ${
@@ -3242,11 +3312,23 @@ HLA-C*08:02	EICHTVYYQ	Indel	NPM1	11	94024257	94024259	TA	GGGT	indel	TA>GGGT	p.M1
               {showDataTable ? 'Hide' : 'Show'} Data Table
             </button>
             <button
+              onClick={() => setTopNOnlyViz(!topNOnlyViz)}
+              className={`px-4 py-2 rounded-md cursor-pointer text-sm font-medium flex items-center gap-2 transition ${
+                topNOnlyViz
+                  ? 'bg-gray-800 text-white'
+                  : 'bg-white text-gray-700 border border-gray-300 hover:bg-gray-50'
+              }`}
+              title={topNOnlyViz ? 'Showing only top N pMHCs in visualizations' : 'Showing all pMHCs with top N highlighted in visualizations'}
+            >
+              <Icon name="filter" size={16} />
+              {topNOnlyViz ? 'Top N Only' : 'All Data'}
+            </button>
+            <button
               onClick={() => generateReport('clinical')}
               className="px-4 py-2 bg-green-600 text-white rounded-md cursor-pointer text-sm font-medium flex items-center gap-2 hover:bg-green-700 transition"
             >
               <Icon name="file-text" size={16} />
-              Clinical Summary
+              One-page Report
             </button>
             <button
               onClick={() => generateReport('full')}
@@ -3307,20 +3389,23 @@ HLA-C*08:02	EICHTVYYQ	Indel	NPM1	11	94024257	94024259	TA	GGGT	indel	TA>GGGT	p.M1
     };
 
     // Visualization Panel
-    const VisualizationPanel = ({ fullPatientData, topNData, allPatientsData, sortMetric, selectedRow, setSelectedRow, topN, selectedPatient }) => (
+    const VisualizationPanel = ({ fullPatientData, topNData, allPatientsData, sortMetric, selectedRow, setSelectedRow, topN, selectedPatient, topNOnlyViz }) => {
+      const vizData = topNOnlyViz ? topNData : fullPatientData;
+      const vizTopN = topNOnlyViz ? topNData : topNData;
+      return (
       <div className="bg-white rounded-lg shadow-md p-4 md:p-6 mb-4">
         <h3 className="text-base font-semibold text-gray-800 mb-4">Distribution Analysis</h3>
 
         {/* Histograms */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-6">
           {visMetrics.map(metric => (
-            <Histogram key={metric} data={fullPatientData} topNData={topNData} metric={metric} selectedRow={selectedRow} topN={topN} />
+            <Histogram key={metric} data={vizData} topNData={vizTopN} metric={metric} selectedRow={selectedRow} topN={topN} />
           ))}
         </div>
 
         {/* Scatter Matrix */}
         <h4 className="text-sm font-semibold text-gray-800 mt-6 mb-4">Correlation Matrix</h4>
-        <ScatterMatrix data={fullPatientData} topNData={topNData} metrics={visMetrics.slice(0, 4)} selectedRow={selectedRow} setSelectedRow={setSelectedRow} />
+        <ScatterMatrix data={vizData} topNData={vizTopN} metrics={visMetrics.slice(0, 4)} selectedRow={selectedRow} setSelectedRow={setSelectedRow} />
 
         {/* Box Plots */}
         {allPatientsData.length > fullPatientData.length && (
@@ -3335,6 +3420,7 @@ HLA-C*08:02	EICHTVYYQ	Indel	NPM1	11	94024257	94024259	TA	GGGT	indel	TA>GGGT	p.M1
         )}
       </div>
     );
+    };
 
     // Histogram Component
     const Histogram = ({ data, topNData, metric, selectedRow, topN }) => {
@@ -4181,6 +4267,42 @@ HLA-C*08:02	EICHTVYYQ	Indel	NPM1	11	94024257	94024259	TA	GGGT	indel	TA>GGGT	p.M1
     };
 
     // QC Summary Dashboard - curated per-sample metrics
+    const ExpandableQcMetrics = ({ sample }) => {
+      const [expanded, setExpanded] = useState(false);
+      const toolCount = Object.keys(sample.all_metrics || {}).length;
+      if (toolCount === 0) return null;
+      return (
+        <div className="mt-3">
+          <button onClick={() => setExpanded(!expanded)} className="flex items-center gap-1.5 text-xs font-medium text-indigo-600 hover:text-indigo-800 cursor-pointer">
+            <Icon name={expanded ? 'chevron-up' : 'chevron-down'} size={14} />
+            {expanded ? 'Hide' : 'Show'} All Metrics ({toolCount} tools)
+          </button>
+          {expanded && (
+            <div className="mt-2 space-y-2">
+              {Object.entries(sample.all_metrics).map(([tool, data]) => {
+                const metrics = data.metrics || {};
+                const keys = Object.keys(metrics);
+                if (keys.length === 0) return null;
+                return (
+                  <div key={tool} className="border border-gray-100 rounded-md p-2.5 bg-white">
+                    <div className="text-xs font-semibold text-gray-700 mb-1.5">{data.label || tool}</div>
+                    <div className="grid grid-cols-2 md:grid-cols-3 gap-x-3 gap-y-1">
+                      {keys.map(key => (
+                        <div key={key} className="text-xs">
+                          <span className="text-gray-500">{key.replace(/_/g, ' ')}:</span>{' '}
+                          <span className="font-medium text-gray-800">{formatQcValue(metrics[key])}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      );
+    };
+
     const QCSummaryDashboard = ({ patient, qcData }) => {
       const [showInDepth, setShowInDepth] = useState(false);
       const [selectedQcGroup, setSelectedQcGroup] = useState(null);
@@ -4284,6 +4406,9 @@ HLA-C*08:02	EICHTVYYQ	Indel	NPM1	11	94024257	94024259	TA	GGGT	indel	TA>GGGT	p.M1
                 </div>
               );
             })()}
+            {sample.all_metrics && Object.keys(sample.all_metrics).length > 0 && (
+              <ExpandableQcMetrics sample={sample} />
+            )}
           </div>
         );
       };
@@ -5215,16 +5340,18 @@ HLA-C*08:02	EICHTVYYQ	Indel	NPM1	11	94024257	94024259	TA	GGGT	indel	TA>GGGT	p.M1
     };
 
     // pMHC Cards Component
-    const PMHCCards = ({ data, sortMetric, comments, setComments, selectedRow, setSelectedRow, hasCustomFormula, tumorType, tumorSubtype }) => (
+    const PMHCCards = ({ data, sortMetric, comments, setComments, selectedRow, setSelectedRow, hasCustomFormula, tumorType, tumorSubtype, multiAllelePeptides, groupedData }) => {
+      const displayGroups = groupedData || data.map(row => ({ key: `${row.peptide}-${row.allele}`, isDuplicate: false, rows: [row], avgRow: row }));
+      return (
       <div className="mt-4">
         <h3 className="text-base font-semibold text-gray-800 mb-4">Top {data.length} pMHCs</h3>
         <div className="grid gap-3">
-          {data.map((row, idx) => (
-            <PMHCCard key={`${row.peptide}-${row.allele}-${idx}`} row={row} idx={idx} sortMetric={sortMetric} comments={comments} setComments={setComments} isSelected={selectedRow?.peptide === row.peptide && selectedRow?.allele === row.allele} onSelect={() => setSelectedRow(row)} hasCustomFormula={hasCustomFormula} tumorType={tumorType} tumorSubtype={tumorSubtype} />
+          {displayGroups.map((group, idx) => (
+            <PMHCCard key={`${group.key}-${idx}`} row={group.avgRow} idx={idx} sortMetric={sortMetric} comments={comments} setComments={setComments} isSelected={selectedRow?.peptide === group.avgRow.peptide && selectedRow?.allele === group.avgRow.allele} onSelect={() => setSelectedRow(group.avgRow)} hasCustomFormula={hasCustomFormula} tumorType={tumorType} tumorSubtype={tumorSubtype} hasMultiAllele={multiAllelePeptides && multiAllelePeptides.has(group.avgRow.peptide)} group={group} />
           ))}
         </div>
       </div>
-    );
+    ); };
 
     const parseJsonField = (value) => {
       if (!value) return null;
@@ -5449,8 +5576,10 @@ HLA-C*08:02	EICHTVYYQ	Indel	NPM1	11	94024257	94024259	TA	GGGT	indel	TA>GGGT	p.M1
     };
 
     // pMHC Card Component
-    const PMHCCard = ({ row, idx, sortMetric, comments, setComments, isSelected, onSelect, hasCustomFormula, tumorType, tumorSubtype }) => {
+    const PMHCCard = ({ row, idx, sortMetric, comments, setComments, isSelected, onSelect, hasCustomFormula, tumorType, tumorSubtype, hasMultiAllele, group }) => {
       const key = `${row.peptide}-${row.allele}`;
+      const [showOrigins, setShowOrigins] = useState(false);
+      const isDuplicate = group && group.isDuplicate;
       const [expanded, setExpanded] = useState(false);
       const sourceFields = SOURCE_FIELDS[row.antigen_source] || [];
       const antigenSource = (row.antigen_source || '').toLowerCase();
@@ -5483,6 +5612,12 @@ HLA-C*08:02	EICHTVYYQ	Indel	NPM1	11	94024257	94024259	TA	GGGT	indel	TA>GGGT	p.M1
                   row.antigen_source === 'Splice' ? 'bg-teal-100 text-teal-700' :
                   'bg-blue-100 text-blue-700'
                 }`}>{row.antigen_source}</span>
+                {isDuplicate && (
+                  <span className="inline-block px-1.5 py-0.5 rounded text-xs font-medium bg-rose-100 text-rose-700 ml-1">Multiple Genomic Origins</span>
+                )}
+                {hasMultiAllele && (
+                  <span className="inline-block px-1.5 py-0.5 rounded text-xs font-medium bg-amber-100 text-amber-700 ml-1">Multiple HLA Alleles</span>
+                )}
               </div>
             </div>
             <div className="flex items-center gap-2">
@@ -5586,6 +5721,48 @@ HLA-C*08:02	EICHTVYYQ	Indel	NPM1	11	94024257	94024259	TA	GGGT	indel	TA>GGGT	p.M1
           )}
 
           {expanded && <ExpandedCardContent row={row} />}
+
+          {isDuplicate && (
+            <div className="mb-3">
+              <button
+                onClick={(e) => { e.stopPropagation(); setShowOrigins(!showOrigins); }}
+                className="flex items-center gap-1.5 text-xs font-medium text-rose-700 hover:text-rose-900 cursor-pointer"
+              >
+                <Icon name={showOrigins ? 'chevron-up' : 'chevron-down'} size={14} />
+                {showOrigins ? 'Hide' : 'Show'} {group.rows.length} Genomic Origins (showing averages above)
+              </button>
+              {showOrigins && (
+                <div className="mt-2 space-y-2">
+                  {group.rows.map((origin, oi) => (
+                    <div key={oi} className="border border-gray-200 rounded-md p-2.5 bg-gray-50">
+                      <div className="flex items-center gap-1.5 mb-1.5">
+                        <span className={`inline-block px-1.5 py-0.5 rounded text-xs font-medium ${
+                          origin.antigen_source === 'CTA' ? 'bg-purple-100 text-purple-700' :
+                          origin.antigen_source === 'Fusion' ? 'bg-orange-100 text-orange-700' :
+                          origin.antigen_source === 'Virus' ? 'bg-red-100 text-red-700' :
+                          origin.antigen_source === 'ERV' ? 'bg-yellow-100 text-yellow-700' :
+                          origin.antigen_source === 'Splice' ? 'bg-teal-100 text-teal-700' :
+                          'bg-blue-100 text-blue-700'
+                        }`}>{origin.antigen_source}</span>
+                        {origin.transcript_id && <span className="text-xs text-gray-500 font-mono">{origin.transcript_id}</span>}
+                        {origin.gene_name && <span className="text-xs text-gray-500">&bull; {origin.gene_name}</span>}
+                      </div>
+                      <div className="grid grid-cols-3 gap-x-3 gap-y-0.5 text-xs">
+                        <div><span className="text-gray-500">Priority:</span> <span className="font-medium">{(parseFloat(origin[sortMetric]) || 0).toFixed(3)}</span></div>
+                        <div><span className="text-gray-500">MHCFlurry:</span> <span className="font-medium">{(parseFloat(origin['mhcflurry_2.1.1.aff']) || 0).toFixed(1)}</span></div>
+                        <div><span className="text-gray-500">CCF:</span> <span className="font-medium">{(parseFloat(origin.ccf) || 0).toFixed(3)}</span></div>
+                        <div><span className="text-gray-500">VAF:</span> <span className="font-medium">{(parseFloat(origin.vaf) || 0).toFixed(3)}</span></div>
+                        <div><span className="text-gray-500">TPM:</span> <span className="font-medium">{(parseFloat(origin.tpm) || 0).toFixed(1)}</span></div>
+                        {origin.fusion_support_reads && <div><span className="text-gray-500">Support Reads:</span> <span className="font-medium">{origin.fusion_support_reads}</span></div>}
+                        {origin.splice_type && <div><span className="text-gray-500">Splice Type:</span> <span className="font-medium">{origin.splice_type}</span></div>}
+                        {origin.cta_transcript && <div><span className="text-gray-500">CTA Transcript:</span> <span className="font-medium">{origin.cta_transcript}</span></div>}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
 
           <div>
             <label className="block mb-1 text-xs font-medium text-gray-700">Comments</label>
