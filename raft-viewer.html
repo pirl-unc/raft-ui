@@ -2381,7 +2381,7 @@ HLA-C*08:02	EICHTVYYQ	Indel	NPM1	11	94024257	94024259	TA	GGGT	indel	TA>GGGT	p.M1
         setSelectedAntigenSources(newSet);
       };
 
-      const generateReport = (type) => {
+      const generateReport = async (type) => {
         const patient = patients[selectedPatient];
         if (!patient) return;
         const sortMetric = getActiveSortMetric();
@@ -2552,25 +2552,33 @@ HLA-C*08:02	EICHTVYYQ	Indel	NPM1	11	94024257	94024259	TA	GGGT	indel	TA>GGGT	p.M1
         </body></html>`;
 
         // Generate PDF using html2pdf.js
+        // html2canvas requires the element to be actually visible on screen to render.
+        // We create a container, make it visible briefly, capture, then remove it.
         const container = document.createElement('div');
         container.innerHTML = html;
-        // Must be visible for html2canvas to render properly — use fixed positioning
-        container.style.cssText = 'position:fixed;left:0;top:0;width:11in;z-index:-9999;opacity:0;pointer-events:none;background:#fff;';
+        // Must be visible and in the layout for html2canvas to capture properly.
+        // Use a fixed overlay with a loading message so the user knows what's happening.
+        const overlay = document.createElement('div');
+        overlay.style.cssText = 'position:fixed;inset:0;z-index:10000;background:rgba(0,0,0,0.5);display:flex;align-items:center;justify-content:center;';
+        overlay.innerHTML = '<div style="background:white;padding:24px 40px;border-radius:8px;font-family:sans-serif;font-size:16px;">Generating PDF...</div>';
+        document.body.appendChild(overlay);
+        container.style.cssText = 'position:absolute;left:0;top:0;width:11in;background:#fff;';
         document.body.appendChild(container);
+        // Let the browser render
+        await new Promise(r => setTimeout(r, 100));
 
         const filename = `${isClinical ? 'lens_one_page_report' : 'lens_full_report'}_${selectedPatient}_${dateStr}.pdf`;
-        html2pdf().set({
-          margin: [0.5, 0.5, 0.5, 0.5],
-          filename: filename,
-          image: { type: 'jpeg', quality: 0.98 },
-          html2canvas: { scale: 2, useCORS: true, logging: false, allowTaint: true },
-          jsPDF: { unit: 'in', format: 'letter', orientation: 'portrait' },
-          pagebreak: { mode: ['avoid-all', 'css', 'legacy'] }
-        }).from(container).save().then(() => {
-          document.body.removeChild(container);
-        }).catch((err) => {
+        try {
+          await html2pdf().set({
+            margin: [0.5, 0.5, 0.5, 0.5],
+            filename: filename,
+            image: { type: 'jpeg', quality: 0.98 },
+            html2canvas: { scale: 2, useCORS: true, logging: false, allowTaint: true, windowWidth: 792 },
+            jsPDF: { unit: 'in', format: 'letter', orientation: 'portrait' },
+            pagebreak: { mode: ['avoid-all', 'css', 'legacy'] }
+          }).from(container).save();
+        } catch (err) {
           console.error('PDF generation failed, falling back to HTML download:', err);
-          if (document.body.contains(container)) document.body.removeChild(container);
           const blob = new Blob([html], { type: 'text/html' });
           const url = URL.createObjectURL(blob);
           const a = document.createElement('a');
@@ -2578,7 +2586,10 @@ HLA-C*08:02	EICHTVYYQ	Indel	NPM1	11	94024257	94024259	TA	GGGT	indel	TA>GGGT	p.M1
           a.download = `${isClinical ? 'lens_one_page_report' : 'lens_full_report'}_${selectedPatient}_${dateStr}.html`;
           a.click();
           URL.revokeObjectURL(url);
-        });
+        } finally {
+          if (document.body.contains(container)) document.body.removeChild(container);
+          if (document.body.contains(overlay)) document.body.removeChild(overlay);
+        }
       };
 
       // Upload screen — also show when bundle patient selector is active
@@ -3159,6 +3170,24 @@ HLA-C*08:02	EICHTVYYQ	Indel	NPM1	11	94024257	94024259	TA	GGGT	indel	TA>GGGT	p.M1
               Define a custom formula using column names and operators (+, -, *, /, min(), max(), bound1()).
               <br /><code className="bg-gray-100 px-1 py-0.5 rounded text-xs">bound1(priority_score_maximum) * bound1(ccf) + bound1(vaf)</code>
             </p>
+            <details className="mb-2">
+              <summary className="text-xs font-medium text-blue-600 hover:text-blue-800 cursor-pointer">Available variables</summary>
+              <div className="mt-1 text-xs text-gray-600 bg-gray-50 rounded p-2 space-y-1.5">
+                <div><span className="font-mono bg-white px-1 rounded border">priority_score_maximum</span> — Max priority score across predictors</div>
+                <div><span className="font-mono bg-white px-1 rounded border">ccf</span> — Cancer Cell Fraction (proportion of tumor cells carrying the variant)</div>
+                <div><span className="font-mono bg-white px-1 rounded border">vaf</span> — Variant Allele Frequency (RNA, unless DNA-only)</div>
+                <div><span className="font-mono bg-white px-1 rounded border">tpm</span> — Gene-level TPM (transcripts per million, use bound1() to normalize)</div>
+                <div><span className="font-mono bg-white px-1 rounded border">ic50</span> — MHC binding affinity in nM (lower = stronger binding)</div>
+                <div><span className="font-mono bg-white px-1 rounded border">mhcflurry_2.1.1.aff</span> — MHCflurry predicted binding affinity</div>
+                <div><span className="font-mono bg-white px-1 rounded border">mhcflurry_2.1.1.pres_score</span> — MHCflurry presentation score</div>
+                <div><span className="font-mono bg-white px-1 rounded border">percentile_rank</span> — NetMHCpan binding percentile rank</div>
+                <div><span className="font-mono bg-white px-1 rounded border">dna_vaf</span> — DNA variant allele frequency</div>
+                <div><span className="font-mono bg-white px-1 rounded border">dna_alt_count</span> / <span className="font-mono bg-white px-1 rounded border">dna_total_depth</span> — DNA alt reads / total depth</div>
+                <div><span className="font-mono bg-white px-1 rounded border">rna_vaf</span> — RNA variant allele frequency</div>
+                <div><span className="font-mono bg-white px-1 rounded border">rna_alt_count</span> / <span className="font-mono bg-white px-1 rounded border">rna_total_depth</span> — RNA alt reads / total depth</div>
+                <div className="text-gray-400 mt-1 pt-1 border-t border-gray-200">Use <span className="font-mono bg-white px-1 rounded border">bound1(col)</span> to normalize a column to 0–100 (value / max × 100). Useful for combining values on different scales.</div>
+              </div>
+            </details>
             <textarea
               value={globalFormula} onChange={(e) => setGlobalFormula(e.target.value)}
               placeholder="e.g., priority_score_maximum * ccf + vaf"
@@ -3301,7 +3330,27 @@ HLA-C*08:02	EICHTVYYQ	Indel	NPM1	11	94024257	94024259	TA	GGGT	indel	TA>GGGT	p.M1
           )}
 
           {/* Action Buttons */}
-          <div className="flex gap-2 justify-center mt-4">
+          <div className="flex gap-2 justify-center mt-4 flex-wrap">
+            <button
+              onClick={() => setTopNOnlyViz(false)}
+              className={`px-4 py-2 rounded-md cursor-pointer text-sm font-medium flex items-center gap-2 transition border-2 ${
+                !topNOnlyViz
+                  ? 'bg-green-600 text-white border-green-600 hover:bg-green-700'
+                  : 'bg-white text-red-700 border-red-300 hover:bg-red-50'
+              }`}
+            >
+              All Data
+            </button>
+            <button
+              onClick={() => setTopNOnlyViz(true)}
+              className={`px-4 py-2 rounded-md cursor-pointer text-sm font-medium flex items-center gap-2 transition border-2 ${
+                topNOnlyViz
+                  ? 'bg-green-600 text-white border-green-600 hover:bg-green-700'
+                  : 'bg-white text-red-700 border-red-300 hover:bg-red-50'
+              }`}
+            >
+              Top pMHCs Only
+            </button>
             <button
               onClick={() => setShowDataTable(!showDataTable)}
               className={`px-4 py-2 rounded-md cursor-pointer text-sm font-medium flex items-center gap-2 transition ${
@@ -3313,24 +3362,6 @@ HLA-C*08:02	EICHTVYYQ	Indel	NPM1	11	94024257	94024259	TA	GGGT	indel	TA>GGGT	p.M1
               <Icon name={showDataTable ? 'chevron-down' : 'chevron-right'} size={16} />
               {showDataTable ? 'Hide' : 'Show'} Data Table
             </button>
-            <div className="flex items-center gap-1 bg-gray-100 rounded-md p-0.5">
-              <button
-                onClick={() => setTopNOnlyViz(false)}
-                className={`px-3 py-1.5 rounded cursor-pointer text-xs font-medium transition ${
-                  !topNOnlyViz ? 'bg-white text-gray-800 shadow-sm' : 'text-gray-500 hover:text-gray-700'
-                }`}
-              >
-                All Data
-              </button>
-              <button
-                onClick={() => setTopNOnlyViz(true)}
-                className={`px-3 py-1.5 rounded cursor-pointer text-xs font-medium transition ${
-                  topNOnlyViz ? 'bg-white text-gray-800 shadow-sm' : 'text-gray-500 hover:text-gray-700'
-                }`}
-              >
-                Top N Only
-              </button>
-            </div>
             <button
               onClick={() => generateReport('clinical')}
               className="px-4 py-2 bg-green-600 text-white rounded-md cursor-pointer text-sm font-medium flex items-center gap-2 hover:bg-green-700 transition"
@@ -3452,7 +3483,7 @@ HLA-C*08:02	EICHTVYYQ	Indel	NPM1	11	94024257	94024259	TA	GGGT	indel	TA>GGGT	p.M1
         const containerWidth = containerRef.current.clientWidth || 320;
         const width = Math.max(200, Math.min(containerWidth - 24, 400)); // Account for padding
         const height = Math.round(width * 0.56); // 16:9 aspect ratio
-        const margin = { top: 20, right: 20, bottom: 40, left: 50 };
+        const margin = { top: 20, right: 20, bottom: 50, left: 50 };
 
         // Set SVG dimensions
         svg.attr('width', width).attr('height', height);
@@ -3496,6 +3527,11 @@ HLA-C*08:02	EICHTVYYQ	Indel	NPM1	11	94024257	94024259	TA	GGGT	indel	TA>GGGT	p.M1
 
         g.append('g').attr('transform', `translate(0,${height - margin.bottom})`).call(d3.axisBottom(x).ticks(5)).style('font-size', '10px');
         g.append('g').attr('transform', `translate(${margin.left},0)`).call(d3.axisLeft(y).ticks(5)).style('font-size', '10px');
+
+        // Axis labels
+        const axisLabel = metric === 'tpm' ? 'log2(TPM)' : metric.includes('mhcflurry_2.1.1.aff') ? 'MHCflurry Affinity (nM)' : metric.includes('mhcflurry_2.1.1.pres') ? 'MHCflurry Presentation' : metric.replace(/_/g, ' ');
+        g.append('text').attr('x', (width + margin.left - margin.right) / 2).attr('y', height - 2).attr('text-anchor', 'middle').style('font-size', '10px').style('fill', '#6b7280').text(axisLabel);
+        g.append('text').attr('transform', 'rotate(-90)').attr('x', -(margin.top + (height - margin.bottom - margin.top) / 2)).attr('y', 10).attr('text-anchor', 'middle').style('font-size', '10px').style('fill', '#6b7280').text('Count');
       }, [data, topNData, metric, selectedRow, topN]);
 
       const label = metric === 'tpm' ? 'LOG2(TPM)' : metric.includes('mhcflurry_2.1.1.aff') ? 'MHCFLURRY AFFINITY' : metric.includes('mhcflurry_2.1.1.pres') ? 'MHCFLURRY PRESENTATION SCORE' : metric.replace(/_/g, ' ').toUpperCase();
@@ -3585,6 +3621,11 @@ HLA-C*08:02	EICHTVYYQ	Indel	NPM1	11	94024257	94024259	TA	GGGT	indel	TA>GGGT	p.M1
 
         g.append('g').attr('transform', `translate(0,${height - margin.bottom})`).call(d3.axisBottom(x).ticks(4)).style('font-size', '9px');
         g.append('g').attr('transform', `translate(${margin.left},0)`).call(d3.axisLeft(y).ticks(4)).style('font-size', '9px');
+
+        // Axis labels
+        const formatAxisLabel = (m) => m === 'tpm' ? 'log2(TPM)' : m.includes('mhcflurry_2.1.1.aff') ? 'MHCflurry Affinity' : m.includes('mhcflurry_2.1.1.pres') ? 'MHCflurry Pres.' : m.replace(/_/g, ' ');
+        g.append('text').attr('x', (width + margin.left - margin.right) / 2).attr('y', height - 2).attr('text-anchor', 'middle').style('font-size', '9px').style('fill', '#6b7280').text(formatAxisLabel(metricX));
+        g.append('text').attr('transform', 'rotate(-90)').attr('x', -(margin.top + (height - margin.bottom - margin.top) / 2)).attr('y', 8).attr('text-anchor', 'middle').style('font-size', '9px').style('fill', '#6b7280').text(formatAxisLabel(metricY));
       }, [data, topNData, metricX, metricY, selectedRow, setSelectedRow]);
 
       return <svg ref={svgRef} className="w-full h-full" style={{ minWidth: '120px', minHeight: '120px' }} />;
@@ -5436,12 +5477,14 @@ HLA-C*08:02	EICHTVYYQ	Indel	NPM1	11	94024257	94024259	TA	GGGT	indel	TA>GGGT	p.M1
       SNV: [
         { key: 'chromosome', label: 'Chromosome' },
         { key: 'start', label: 'Position' },
+        { key: 'annotation', label: 'Annotation' },
         { key: 'consequence', label: 'Consequence' },
         { key: 'impact', label: 'Impact' },
       ],
       Indel: [
         { key: 'chromosome', label: 'Chromosome' },
         { key: 'start', label: 'Position' },
+        { key: 'annotation', label: 'Annotation' },
         { key: 'consequence', label: 'Consequence' },
         { key: 'impact', label: 'Impact' },
       ],
@@ -5694,12 +5737,18 @@ HLA-C*08:02	EICHTVYYQ	Indel	NPM1	11	94024257	94024259	TA	GGGT	indel	TA>GGGT	p.M1
           <div className="mb-3 p-3 bg-gray-50 rounded-md">
             <table className="w-full"><tbody>
               {hasCustomFormula && <MetricDisplay label="Custom Score" value={row.custom_score} highlight />}
-              <MetricDisplay label="Priority Score" value={row[sortMetric]} />
+              <MetricDisplay label="Priority Score" value={row[sortMetric]} tooltip="Composite score ranking neoantigen immunogenicity potential (higher = more likely immunogenic)" />
               <MetricDisplay label="MHCFlurry Binding Aff" value={row['mhcflurry_2.1.1.aff']} />
               <MetricDisplay label="MHCFlurry Pres Score" value={row['mhcflurry_2.1.1.pres_score']} />
-              <MetricDisplay label="CCF" value={row.ccf} />
-              <MetricDisplay label="VAF" value={row.vaf} />
-              <MetricDisplay label="Log2(TPM)" value={row.tpm} transform={v => { const num = parseFloat(v); return (!isNaN(num) && num > 0) ? Math.log2(num) : null; }} />
+              <MetricDisplay label="CCF" value={row.ccf} tooltip="Cancer Cell Fraction: proportion of tumor cells carrying this variant" />
+              <MetricDisplay label="VAF" value={row.vaf} tooltip="Variant Allele Frequency: fraction of reads supporting the alternate allele" />
+              <MetricDisplay label="Gene TPM" value={row.gene_tpm || row.tpm} tooltip="Gene-level transcripts per million from RNAseq" />
+              {row.rna_ref_count && row.rna_alt_count && (() => {
+                const wt = parseInt(row.rna_ref_count) || 0;
+                const mt = parseInt(row.rna_alt_count) || 0;
+                if (wt + mt === 0) return null;
+                return <MetricDisplay label="WT:Mut RNA" value={wt > 0 ? (wt / mt).toFixed(1) : '0'} isText tooltip={`RNA WT (ref) reads: ${wt}, Mutant (alt) reads: ${mt}`} />;
+              })()}
               {(row.binding_level || row.ic50 || row.percentile_rank) && (
                 <tr><td colSpan={2} className="pt-1 pb-0.5">
                   <div className="border-t border-gray-200 mt-1 mb-0.5"></div>
@@ -5860,7 +5909,7 @@ HLA-C*08:02	EICHTVYYQ	Indel	NPM1	11	94024257	94024259	TA	GGGT	indel	TA>GGGT	p.M1
     };
 
     // Metric Display Component — renders a table row (key left, value right)
-    const MetricDisplay = ({ label, value, highlight, transform, isText }) => {
+    const MetricDisplay = ({ label, value, highlight, transform, isText, tooltip }) => {
       const displayValue = (v) => {
         if (v === null || v === undefined || v === '' || v === 'NA') return 'N/A';
         if (isText) return String(v);
@@ -5869,7 +5918,7 @@ HLA-C*08:02	EICHTVYYQ	Indel	NPM1	11	94024257	94024259	TA	GGGT	indel	TA>GGGT	p.M1
       };
       return (
         <tr className={highlight ? 'bg-indigo-50' : ''}>
-          <td className={`pr-3 py-0.5 text-xs uppercase tracking-wide whitespace-nowrap ${highlight ? 'text-indigo-700 font-semibold' : 'text-gray-500'}`}>{label}</td>
+          <td className={`pr-3 py-0.5 text-xs uppercase tracking-wide whitespace-nowrap ${highlight ? 'text-indigo-700 font-semibold' : 'text-gray-500'}`} title={tooltip || ''}>{label}{tooltip ? ' ℹ' : ''}</td>
           <td className={`py-0.5 text-sm font-semibold ${highlight ? 'text-indigo-900' : 'text-gray-800'}`}>{displayValue(value)}</td>
         </tr>
       );
