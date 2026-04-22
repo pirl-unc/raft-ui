@@ -2551,9 +2551,11 @@ HLA-C*08:02	EICHTVYYQ	Indel	NPM1	11	94024257	94024259	TA	GGGT	indel	TA>GGGT	p.M1
           </div>
         </body></html>`;
 
+        // Generate PDF using html2pdf.js
         const container = document.createElement('div');
         container.innerHTML = html;
-        container.style.cssText = 'position:absolute;left:-9999px;top:0;width:11in;';
+        // Must be visible for html2canvas to render properly — use fixed positioning
+        container.style.cssText = 'position:fixed;left:0;top:0;width:11in;z-index:-9999;opacity:0;pointer-events:none;background:#fff;';
         document.body.appendChild(container);
 
         const filename = `${isClinical ? 'lens_one_page_report' : 'lens_full_report'}_${selectedPatient}_${dateStr}.pdf`;
@@ -2561,14 +2563,14 @@ HLA-C*08:02	EICHTVYYQ	Indel	NPM1	11	94024257	94024259	TA	GGGT	indel	TA>GGGT	p.M1
           margin: [0.5, 0.5, 0.5, 0.5],
           filename: filename,
           image: { type: 'jpeg', quality: 0.98 },
-          html2canvas: { scale: 2, useCORS: true, logging: false },
+          html2canvas: { scale: 2, useCORS: true, logging: false, allowTaint: true },
           jsPDF: { unit: 'in', format: 'letter', orientation: 'portrait' },
           pagebreak: { mode: ['avoid-all', 'css', 'legacy'] }
         }).from(container).save().then(() => {
           document.body.removeChild(container);
         }).catch((err) => {
           console.error('PDF generation failed, falling back to HTML download:', err);
-          document.body.removeChild(container);
+          if (document.body.contains(container)) document.body.removeChild(container);
           const blob = new Blob([html], { type: 'text/html' });
           const url = URL.createObjectURL(blob);
           const a = document.createElement('a');
@@ -3299,7 +3301,7 @@ HLA-C*08:02	EICHTVYYQ	Indel	NPM1	11	94024257	94024259	TA	GGGT	indel	TA>GGGT	p.M1
           )}
 
           {/* Action Buttons */}
-          <div className="flex gap-2 flex-wrap justify-center">
+          <div className="flex gap-2 justify-center mt-4">
             <button
               onClick={() => setShowDataTable(!showDataTable)}
               className={`px-4 py-2 rounded-md cursor-pointer text-sm font-medium flex items-center gap-2 transition ${
@@ -3311,18 +3313,24 @@ HLA-C*08:02	EICHTVYYQ	Indel	NPM1	11	94024257	94024259	TA	GGGT	indel	TA>GGGT	p.M1
               <Icon name={showDataTable ? 'chevron-down' : 'chevron-right'} size={16} />
               {showDataTable ? 'Hide' : 'Show'} Data Table
             </button>
-            <button
-              onClick={() => setTopNOnlyViz(!topNOnlyViz)}
-              className={`px-4 py-2 rounded-md cursor-pointer text-sm font-medium flex items-center gap-2 transition ${
-                topNOnlyViz
-                  ? 'bg-gray-800 text-white'
-                  : 'bg-white text-gray-700 border border-gray-300 hover:bg-gray-50'
-              }`}
-              title={topNOnlyViz ? 'Showing only top N pMHCs in visualizations' : 'Showing all pMHCs with top N highlighted in visualizations'}
-            >
-              <Icon name="filter" size={16} />
-              {topNOnlyViz ? 'Top N Only' : 'All Data'}
-            </button>
+            <div className="flex items-center gap-1 bg-gray-100 rounded-md p-0.5">
+              <button
+                onClick={() => setTopNOnlyViz(false)}
+                className={`px-3 py-1.5 rounded cursor-pointer text-xs font-medium transition ${
+                  !topNOnlyViz ? 'bg-white text-gray-800 shadow-sm' : 'text-gray-500 hover:text-gray-700'
+                }`}
+              >
+                All Data
+              </button>
+              <button
+                onClick={() => setTopNOnlyViz(true)}
+                className={`px-3 py-1.5 rounded cursor-pointer text-xs font-medium transition ${
+                  topNOnlyViz ? 'bg-white text-gray-800 shadow-sm' : 'text-gray-500 hover:text-gray-700'
+                }`}
+              >
+                Top N Only
+              </button>
+            </div>
             <button
               onClick={() => generateReport('clinical')}
               className="px-4 py-2 bg-green-600 text-white rounded-md cursor-pointer text-sm font-medium flex items-center gap-2 hover:bg-green-700 transition"
@@ -4271,6 +4279,15 @@ HLA-C*08:02	EICHTVYYQ	Indel	NPM1	11	94024257	94024259	TA	GGGT	indel	TA>GGGT	p.M1
       const [expanded, setExpanded] = useState(false);
       const toolCount = Object.keys(sample.all_metrics || {}).length;
       if (toolCount === 0) return null;
+      const toolOrder = ['fastp', 'samtools_stats', 'star_map', 'qualimap_bamqc', 'qualimap_rnaseq', 'picard2_collect_rna_seq_metrics', 'bcftools_stats', 'somalier', 'seq2hla', 'salmon_quant', 'gatk4_merge_mutect_stats', 'whatshap', 'lohhla', 'parse_lohhla'];
+      const sortedTools = Object.entries(sample.all_metrics || {}).sort(([a], [b]) => {
+        const ai = toolOrder.indexOf(a);
+        const bi = toolOrder.indexOf(b);
+        return (ai === -1 ? 999 : ai) - (bi === -1 ? 999 : bi);
+      });
+      const formatMetricName = (key) => {
+        return key.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+      };
       return (
         <div className="mt-3">
           <button onClick={() => setExpanded(!expanded)} className="flex items-center gap-1.5 text-xs font-medium text-indigo-600 hover:text-indigo-800 cursor-pointer">
@@ -4278,21 +4295,28 @@ HLA-C*08:02	EICHTVYYQ	Indel	NPM1	11	94024257	94024259	TA	GGGT	indel	TA>GGGT	p.M1
             {expanded ? 'Hide' : 'Show'} All Metrics ({toolCount} tools)
           </button>
           {expanded && (
-            <div className="mt-2 space-y-2">
-              {Object.entries(sample.all_metrics).map(([tool, data]) => {
+            <div className="mt-2 space-y-2 max-h-96 overflow-y-auto">
+              {sortedTools.map(([tool, data]) => {
                 const metrics = data.metrics || {};
                 const keys = Object.keys(metrics);
                 if (keys.length === 0) return null;
                 return (
-                  <div key={tool} className="border border-gray-100 rounded-md p-2.5 bg-white">
-                    <div className="text-xs font-semibold text-gray-700 mb-1.5">{data.label || tool}</div>
-                    <div className="grid grid-cols-2 md:grid-cols-3 gap-x-3 gap-y-1">
-                      {keys.map(key => (
-                        <div key={key} className="text-xs">
-                          <span className="text-gray-500">{key.replace(/_/g, ' ')}:</span>{' '}
-                          <span className="font-medium text-gray-800">{formatQcValue(metrics[key])}</span>
-                        </div>
-                      ))}
+                  <div key={tool} className="border border-gray-200 rounded-md p-3 bg-white">
+                    <div className="flex items-center gap-2 mb-2">
+                      <Icon name="activity" size={14} className="text-gray-400" />
+                      <div className="text-sm font-semibold text-gray-700">{data.label || tool}</div>
+                      <div className="text-xs text-gray-400">{keys.length} metrics</div>
+                    </div>
+                    <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-x-4 gap-y-1.5">
+                      {keys.map(key => {
+                        const val = metrics[key];
+                        return (
+                          <div key={key} className="py-1">
+                            <div className="text-xs text-gray-500 truncate" title={key}>{formatMetricName(key)}</div>
+                            <div className="text-sm font-medium text-gray-800">{formatQcValue(val)}</div>
+                          </div>
+                        );
+                      })}
                     </div>
                   </div>
                 );
@@ -4402,6 +4426,44 @@ HLA-C*08:02	EICHTVYYQ	Indel	NPM1	11	94024257	94024259	TA	GGGT	indel	TA>GGGT	p.M1
                         <div className="font-semibold text-gray-800 text-sm">{formatQcValue(s[key])}</div>
                       </div>
                     ))}
+                  </div>
+                </div>
+              );
+            })()}
+            {sample.salmon_gene_tpm && (() => {
+              const geneTpm = sample.salmon_gene_tpm;
+              const sortedGenes = Object.entries(geneTpm).sort((a, b) => b[1] - a[1]);
+              const topGenes = sortedGenes.slice(0, 10);
+              const expressedCount = sortedGenes.filter(([, v]) => v > 0).length;
+              const totalGenes = sortedGenes.length;
+              const totalTpm = sortedGenes.reduce((s, [, v]) => s + v, 0);
+              return (
+                <div className="mt-3">
+                  <div className="text-xs font-medium text-gray-500 mb-1.5">Gene Expression (Salmon)</div>
+                  <div className="grid grid-cols-3 gap-2 mb-2">
+                    <div className="bg-white px-3 py-2 rounded shadow-sm">
+                      <div className="text-xs text-gray-500">Total Genes</div>
+                      <div className="font-semibold text-gray-800 text-sm">{totalGenes.toLocaleString()}</div>
+                    </div>
+                    <div className="bg-white px-3 py-2 rounded shadow-sm">
+                      <div className="text-xs text-gray-500">Expressed</div>
+                      <div className="font-semibold text-gray-800 text-sm">{expressedCount.toLocaleString()}</div>
+                    </div>
+                    <div className="bg-white px-3 py-2 rounded shadow-sm">
+                      <div className="text-xs text-gray-500">Total TPM</div>
+                      <div className="font-semibold text-gray-800 text-sm">{formatQcValue(totalTpm)}</div>
+                    </div>
+                  </div>
+                  <div className="bg-white rounded shadow-sm p-2">
+                    <div className="text-xs text-gray-400 mb-1">Top 10 by TPM</div>
+                    <div className="flex flex-wrap gap-x-3 gap-y-1">
+                      {topGenes.map(([gene, tpm]) => (
+                        <span key={gene} className="text-xs">
+                          <span className="font-medium text-gray-700">{gene}</span>
+                          <span className="text-gray-400 ml-1">{tpm.toFixed(1)}</span>
+                        </span>
+                      ))}
+                    </div>
                   </div>
                 </div>
               );
@@ -5638,6 +5700,27 @@ HLA-C*08:02	EICHTVYYQ	Indel	NPM1	11	94024257	94024259	TA	GGGT	indel	TA>GGGT	p.M1
               <MetricDisplay label="CCF" value={row.ccf} />
               <MetricDisplay label="VAF" value={row.vaf} />
               <MetricDisplay label="Log2(TPM)" value={row.tpm} transform={v => { const num = parseFloat(v); return (!isNaN(num) && num > 0) ? Math.log2(num) : null; }} />
+              {(row.binding_level || row.ic50 || row.percentile_rank) && (
+                <tr><td colSpan={2} className="pt-1 pb-0.5">
+                  <div className="border-t border-gray-200 mt-1 mb-0.5"></div>
+                  <div className="text-xs font-medium text-gray-400 mt-0.5">Binding</div>
+                </td></tr>
+              )}
+              {row.binding_level && <MetricDisplay label="Binding Level" value={row.binding_level} isText />}
+              {row.ic50 && <MetricDisplay label="IC50 (nM)" value={row.ic50} />}
+              {row.percentile_rank && <MetricDisplay label="Percentile Rank" value={row.percentile_rank} />}
+              {row.best_allele_binding && <MetricDisplay label="Best Allele" value={row.best_allele_binding} isText />}
+              {(row.dna_alt_count || row.rna_alt_count) && (
+                <tr><td colSpan={2} className="pt-1 pb-0.5">
+                  <div className="border-t border-gray-200 mt-1 mb-0.5"></div>
+                  <div className="text-xs font-medium text-gray-400 mt-0.5">Read Support</div>
+                </td></tr>
+              )}
+              {row.dna_alt_count && <MetricDisplay label="DNA Alt/Depth" value={row.dna_alt_count && row.dna_total_depth ? `${row.dna_alt_count}/${row.dna_total_depth}` : row.dna_alt_count} isText />}
+              {row.dna_vaf && <MetricDisplay label="DNA VAF" value={row.dna_vaf} />}
+              {row.rna_alt_count && <MetricDisplay label="RNA Alt/Depth" value={row.rna_alt_count && row.rna_total_depth ? `${row.rna_alt_count}/${row.rna_total_depth}` : row.rna_alt_count} isText />}
+              {row.rna_vaf && <MetricDisplay label="RNA VAF" value={row.rna_vaf} />}
+              {row.clonal_status && <MetricDisplay label="Clonal Status" value={row.clonal_status} isText />}
               {sourceFields.length > 0 && (
                 <tr><td colSpan={2} className="pt-1 pb-0.5">
                   <div className="border-t border-gray-200 mt-1 mb-0.5"></div>
