@@ -340,6 +340,26 @@ gcloud projects add-iam-policy-binding ${project} \\
               </pre>
             </details>
           </div>
+
+          <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 p-4">
+            <div className="flex items-start gap-2 mb-2">
+              <AlertCircle size={16} className="text-amber-600 mt-0.5 flex-shrink-0" />
+              <span className="text-sm font-medium text-amber-800">OAuth client ID required</span>
+            </div>
+            <p className="text-sm text-amber-700 mb-2">
+              This launcher uses Google Sign-In to authenticate with GCP. You need an OAuth 2.0 client ID for your project:
+            </p>
+            <ol className="text-sm text-amber-700 list-decimal list-inside space-y-1 mb-3">
+              <li>Open the <a href="https://console.cloud.google.com/apis/credentials" target="_blank" rel="noopener noreferrer" className="underline hover:text-amber-900">GCP Console &rarr; APIs &amp; Services &rarr; Credentials</a></li>
+              <li>Click <strong>Create Credentials</strong> &rarr; <strong>OAuth client ID</strong></li>
+              <li>Select <strong>Web application</strong> as the application type</li>
+              <li>Add this page&apos;s origin to <strong>Authorized JavaScript origins</strong>: <code className="bg-amber-100 px-1 rounded">{window.location.origin}</code></li>
+              <li>Copy the generated client ID and set it as <code className="bg-amber-100 px-1 rounded">GOOGLE_OAUTH_CLIENT_ID</code> at the top of this HTML file&apos;s script</li>
+            </ol>
+            <p className="text-xs text-amber-600">
+              Without a valid client ID, the Google Sign-In button will not appear and you cannot submit jobs.
+            </p>
+          </div>
         </div>
       );
     };
