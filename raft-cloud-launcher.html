@@ -44,7 +44,7 @@
     // ─── Provider Configuration ────────────────────────────────────────────────
     // Replace these before publishing to GitHub Pages.
     const GOOGLE_OAUTH_CLIENT_ID = 'YOUR_GOOGLE_OAUTH_CLIENT_ID';
-    const RAFT_RUNNER_IMAGE = 'YOUR_RUNNER_IMAGE_URI';
+    const RAFT_RUNNER_IMAGE = 'docker.io/spvensko/raft-runner:latest';
     // ──────────────────────────────────────────────────────────────────────────
 
     // ─── Data Constants ────────────────────────────────────────────────────────
@@ -815,7 +815,7 @@ gcloud projects add-iam-policy-binding ${project} \\
         bucket: '',
         region: 'us-central1',
         runnerSA: '',
-        runnerImage: RAFT_RUNNER_IMAGE === 'YOUR_RUNNER_IMAGE_URI' ? '' : RAFT_RUNNER_IMAGE,
+        runnerImage: RAFT_RUNNER_IMAGE,
         userEmail: '',
       });
       const [samples, setSamples] = useState([]);
@@ -992,7 +992,7 @@ gcloud projects add-iam-policy-binding ${project} \\
               <div className="max-w-3xl mx-auto flex items-start gap-2">
                 <AlertCircle size={16} className="text-yellow-600 mt-0.5 flex-shrink-0" />
                 <p className="text-sm text-yellow-800">
-                  <strong>Provider setup required:</strong> This launcher is not yet configured. The <code className="bg-yellow-100 px-1 rounded">GOOGLE_OAUTH_CLIENT_ID</code> and <code className="bg-yellow-100 px-1 rounded">RAFT_RUNNER_IMAGE</code> constants at the top of the script must be replaced before use.
+                  <strong>Provider setup required:</strong> This launcher is not yet configured. The <code className="bg-yellow-100 px-1 rounded">GOOGLE_OAUTH_CLIENT_ID</code> constant at the top of the script must be replaced before use.
                 </p>
               </div>
             </div>
