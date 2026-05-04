@@ -242,6 +242,9 @@
         // API configuration
         const API_BASE = window.location.origin;
 
+        // GitLab raw URL base for loading workflow data on GitHub Pages
+        const GITLAB_RAW_BASE = 'https://gitlab.com/reproducible-analyses-framework-and-tools/raft/-/raw/v1.5-dev/src/raft/ui/static';
+
         // State management
         const state = {
             workflow: null,
@@ -284,7 +287,12 @@
         }
 
         async function loadWorkflowDefinitions() {
-            const response = await fetch(`${API_BASE}/api/workflow-definitions`);
+            let response;
+            if (IS_LOCAL) {
+                response = await fetch(`${API_BASE}/api/workflow-definitions`);
+            } else {
+                response = await fetch(`${GITLAB_RAW_BASE}/workflows/index.json`);
+            }
             if (!response.ok) {
                 throw new Error(`Unable to load workflow index: ${response.status}`);
             }
@@ -1292,13 +1300,24 @@
                 if (!selectedDefinition) {
                     throw new Error(`No config template found for ${workflowType}/${version}`);
                 }
-                const configResponse = await fetch(
-                    `${API_BASE}/api/workflow-template?workflow=${encodeURIComponent(workflowType)}&version=${encodeURIComponent(version)}`
-                );
-                if (!configResponse.ok) {
-                    throw new Error(`Failed to load config template: ${configResponse.status}`);
+                let configPayload;
+                if (IS_LOCAL) {
+                    const configResponse = await fetch(
+                        `${API_BASE}/api/workflow-template?workflow=${encodeURIComponent(workflowType)}&version=${encodeURIComponent(version)}`
+                    );
+                    if (!configResponse.ok) {
+                        throw new Error(`Failed to load config template: ${configResponse.status}`);
+                    }
+                    configPayload = await configResponse.json();
+                } else {
+                    const configPath = selectedDefinition.config;
+                    const configResponse = await fetch(`${GITLAB_RAW_BASE}/${configPath}`);
+                    if (!configResponse.ok) {
+                        throw new Error(`Failed to load config template: ${configResponse.status}`);
+                    }
+                    const configText = await configResponse.text();
+                    configPayload = { config: configText, ui: selectedDefinition.ui || {} };
                 }
-                const configPayload = await configResponse.json();
                 const workflowConfigText = configPayload.config;
                 const workflowConfig = parseConfigFile(workflowConfigText, configPayload.ui || {});
                 applyRuntimeDefaults(workflowConfig.paramMap);
