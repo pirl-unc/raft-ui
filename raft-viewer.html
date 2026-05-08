@@ -1052,7 +1052,10 @@ HLA-C*08:02	EICHTVYYQ	Indel	NPM1	11	94024257	94024259	TA	GGGT	indel	TA>GGGT	p.M1
       { value: 'custom_score', label: 'Custom Formula Score' },
     ];
 
-    const visMetrics = ['priority_score_maximum', 'priority_score_mhcflurry', 'mhcflurry_2.1.1.aff', 'ccf', 'vaf', 'tpm'];
+    const LENS_DEFAULT_VIS_METRICS = ['priority_score_maximum', 'priority_score_mhcflurry', 'mhcflurry_2.1.1.aff', 'ccf', 'vaf', 'tpm'];
+    const LENS_DEFAULT_NUMERIC_FIELDS = ['priority_score_maximum', 'priority_score_mhcflurry', 'priority_score_netmhcpan', 'mhcflurry_2.1.1.aff', 'mhcflurry_2.1.1.pres_score', 'netmhcpan_4.1.ba_score', 'netmhcpan_4.1.el_score', 'ccf', 'vaf', 'tpm', 'ic50', 'percentile_rank'];
+    const LENS_DEFAULT_GROUP_BY = ['peptide', 'allele'];
+    const LENS_DEFAULT_FILTER_COLUMNS = {'allele': 'Allele', 'antigen_source': 'Source'};
 
     const TCGA_TUMOR_TYPES = [
       { code: 'ACC', label: 'Adrenocortical carcinoma' },
@@ -1112,7 +1115,7 @@ HLA-C*08:02	EICHTVYYQ	Indel	NPM1	11	94024257	94024259	TA	GGGT	indel	TA>GGGT	p.M1
         {
           id: 'report',
           label: 'Report',
-          renderer: 'lens_antigen_report',
+          renderer: 'report',
           source: 'lens',
           default: true,
           controls: {
@@ -1201,7 +1204,7 @@ HLA-C*08:02	EICHTVYYQ	Indel	NPM1	11	94024257	94024259	TA	GGGT	indel	TA>GGGT	p.M1
       const [patients, setPatients] = useState({});
       const [selectedPatient, setSelectedPatient] = useState(null);
       const [topN, setTopN] = useState(25);
-      const [sortMetric, setSortMetric] = useState('priority_score_maximum');
+      const [sortMetric, setSortMetric] = useState(reportTemplate?.sections?.find(s => s.default || s.renderer === 'report' || s.renderer === 'lens_antigen_report')?.sort_metric || 'priority_score_maximum');
       const [selectedAlleles, setSelectedAlleles] = useState(new Set());
       const [selectedAntigenSources, setSelectedAntigenSources] = useState(new Set());
       const [patientComments, setPatientComments] = useState({});
@@ -1292,18 +1295,18 @@ HLA-C*08:02	EICHTVYYQ	Indel	NPM1	11	94024257	94024259	TA	GGGT	indel	TA>GGGT	p.M1
           parsedRows += rows.length;
           parsed = parseFileContent(filename, content, parsed, activeManifest);
         }
-        // Auto-detect: if data has LENS columns (peptide/allele) but template
-        // uses generic renderer, upgrade to lens_antigen_report
+        // Auto-detect: if data has peptide/allele columns but template
+        // uses generic renderer, upgrade to report renderer
         const firstPatient = Object.values(parsed)[0];
         if (firstPatient?.data?.[0]) {
           const dataKeys = Object.keys(firstPatient.data[0]);
-          const hasLensCols = dataKeys.includes('peptide') && dataKeys.includes('allele');
-          if (hasLensCols) {
+          const hasReportCols = dataKeys.includes('peptide') && dataKeys.includes('allele');
+          if (hasReportCols) {
             setReportTemplate(prev => {
               const sections = (prev.sections || []).map(s => {
-                if (s.source === 'qc' || s.renderer === 'qc_summary' || s.renderer === 'lens_antigen_report') return s;
+                if (s.source === 'qc' || s.renderer === 'qc_summary' || s.renderer === 'report' || s.renderer === 'lens_antigen_report') return s;
                 if (!s.renderer || s.renderer === 'table') {
-                  return { ...s, renderer: 'lens_antigen_report' };
+                  return { ...s, renderer: 'report' };
                 }
                 return s;
               });
@@ -2194,13 +2197,14 @@ HLA-C*08:02	EICHTVYYQ	Indel	NPM1	11	94024257	94024259	TA	GGGT	indel	TA>GGGT	p.M1
 
       // Group currentPatientData by peptide+allele to collapse duplicate genomic origins
       const groupedPatientData = useMemo(() => {
+        const _groupByCols = (reportTemplate?.sections?.find(s => s.renderer === 'report' || s.renderer === 'lens_antigen_report')?.group_by_columns) || LENS_DEFAULT_GROUP_BY;
         const groups = {};
         for (const row of currentPatientData) {
-          const key = `${row.peptide}-${row.allele}`;
+          const key = _groupByCols.map(c => row[c]).join('-');
           if (!groups[key]) groups[key] = [];
           groups[key].push(row);
         }
-        const numericFields = ['priority_score_maximum', 'priority_score_mhcflurry', 'priority_score_netmhcpan', 'mhcflurry_2.1.1.aff', 'mhcflurry_2.1.1.pres_score', 'netmhcpan_4.1.ba_score', 'netmhcpan_4.1.el_score', 'ccf', 'vaf', 'tpm', 'ic50', 'percentile_rank'];
+        const numericFields = (reportTemplate?.sections?.find(s => s.renderer === 'report' || s.renderer === 'lens_antigen_report')?.numeric_columns) || LENS_DEFAULT_NUMERIC_FIELDS;
         return Object.values(groups).map(group => {
           const isDuplicate = group.length > 1;
           if (!isDuplicate) return { key: `${group[0].peptide}-${group[0].allele}`, isDuplicate: false, rows: group, avgRow: group[0] };
@@ -2303,7 +2307,13 @@ HLA-C*08:02	EICHTVYYQ	Indel	NPM1	11	94024257	94024259	TA	GGGT	indel	TA>GGGT	p.M1
         || activeSection?.id === 'qc'
         || activeSection?.id === 'quality_control';
       const activeRenderer = activeSection?.renderer || 'table';
-      const isLensSection = activeRenderer === 'lens_antigen_report';
+      const isReportSection = activeRenderer === 'report' || activeRenderer === 'lens_antigen_report';
+
+      const activeSectionConfig = activeSection || {};
+      const visMetrics = activeSectionConfig.visualize_metrics || LENS_DEFAULT_VIS_METRICS;
+      const numericFields = activeSectionConfig.numeric_columns || LENS_DEFAULT_NUMERIC_FIELDS;
+      const groupByColumns = activeSectionConfig.group_by_columns || LENS_DEFAULT_GROUP_BY;
+      const filterColumns = activeSectionConfig.filter_columns || LENS_DEFAULT_FILTER_COLUMNS;
 
       const activeSectionControls = activeSection?.controls || {};
       const defaultReportSectionId = (
@@ -2494,7 +2504,12 @@ HLA-C*08:02	EICHTVYYQ	Indel	NPM1	11	94024257	94024259	TA	GGGT	indel	TA>GGGT	p.M1
           </tr>`;
         }).join('');
 
-        const title = isClinical ? 'LENS One-page Report' : 'LENS Full Report';
+        const reportSection = reportTemplate?.sections?.find(s => s.renderer === 'report' || s.renderer === 'lens_antigen_report');
+        const reportNames = reportSection?.report_names;
+        const reportName = reportTemplate?.name || 'Report';
+        const title = isClinical
+          ? (reportNames?.one_page || `${reportName} — Summary`)
+          : (reportNames?.full || `${reportName} — Full`);
         const subtitle = isClinical
           ? 'Top neoantigen candidates for review'
           : 'Complete neoantigen report with QC metrics';
@@ -2547,7 +2562,7 @@ HLA-C*08:02	EICHTVYYQ	Indel	NPM1	11	94024257	94024259	TA	GGGT	indel	TA>GGGT	p.M1
           ${!isClinical && qcFullHtml ? '<h2>Detailed QC Metrics</h2>' + qcFullHtml : ''}
           ${qcFilesHtml}
           <div style="margin-top:24px;padding-top:8px;border-top:1px solid #e5e7eb;font-size:11px;color:#9ca3af;">
-            Generated by LENS Report Viewer on ${new Date().toISOString()}
+            Generated by RAFT Report Viewer on ${new Date().toISOString()}
           </div>
         </body></html>`;
 
@@ -2567,7 +2582,8 @@ HLA-C*08:02	EICHTVYYQ	Indel	NPM1	11	94024257	94024259	TA	GGGT	indel	TA>GGGT	p.M1
         // Let the browser render
         await new Promise(r => setTimeout(r, 100));
 
-        const filename = `${isClinical ? 'lens_one_page_report' : 'lens_full_report'}_${selectedPatient}_${dateStr}.pdf`;
+        const reportSlug = reportName.toLowerCase().replace(/[^a-z0-9]+/g, '_');
+        const filename = `${isClinical ? reportSlug + '_summary' : reportSlug + '_full'}_${selectedPatient}_${dateStr}.pdf`;
         try {
           await html2pdf().set({
             margin: [0.5, 0.5, 0.5, 0.5],
@@ -2583,7 +2599,7 @@ HLA-C*08:02	EICHTVYYQ	Indel	NPM1	11	94024257	94024259	TA	GGGT	indel	TA>GGGT	p.M1
           const url = URL.createObjectURL(blob);
           const a = document.createElement('a');
           a.href = url;
-          a.download = `${isClinical ? 'lens_one_page_report' : 'lens_full_report'}_${selectedPatient}_${dateStr}.html`;
+          a.download = `${isClinical ? reportSlug + '_summary' : reportSlug + '_full'}_${selectedPatient}_${dateStr}.html`;
           a.click();
           URL.revokeObjectURL(url);
         } finally {
@@ -2601,7 +2617,7 @@ HLA-C*08:02	EICHTVYYQ	Indel	NPM1	11	94024257	94024259	TA	GGGT	indel	TA>GGGT	p.M1
               <div className="mx-auto mb-6 w-16 h-16 flex items-center justify-center">
                 <Icon name="loader-2" size={48} color="#6b7280" className="animate-spin" />
               </div>
-              <h2 className="text-2xl font-bold text-gray-800 mb-2">{bundleStatus || 'Loading LENS Reports...'}</h2>
+              <h2 className="text-2xl font-bold text-gray-800 mb-2">{bundleStatus || 'Loading Reports...'}</h2>
               <p className="text-gray-500">Please wait while we process your data.</p>
             </>
           );
@@ -2734,7 +2750,7 @@ HLA-C*08:02	EICHTVYYQ	Indel	NPM1	11	94024257	94024259	TA	GGGT	indel	TA>GGGT	p.M1
                       qcData={qcData}
                     />
                   </div>
-                  ) : isLensSection ? (
+                  ) : isReportSection ? (
                   <React.Fragment>
                   {/* Group sub-tabs for multi-group patients (manifest or QC-detected groups) */}
                   {patients[selectedPatient]?.isMultiGroup && (

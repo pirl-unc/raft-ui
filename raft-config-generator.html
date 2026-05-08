@@ -911,6 +911,27 @@
 
         // Cache for BioContainers API results
         const biocontainersCache = {};
+
+        // Cache for workflow-sourced container versions (populated from /api/container-versions)
+        const workflowContainersCache = {};
+
+        // Load container versions from the project's nextflow.config via API
+        async function loadWorkflowContainerVersions(workflow, version, species) {
+            try {
+                const params = new URLSearchParams({ workflow: workflow || '', version: version || '', species: species || '' });
+                const url = IS_LOCAL
+                    ? `${API_BASE}/api/container-versions?${params}`
+                    : `${API_BASE}/api/container-versions?${params}`;
+                const response = await fetch(url);
+                if (response.ok) {
+                    const data = await response.json();
+                    Object.assign(workflowContainersCache, data);
+                    console.log(`Loaded ${Object.keys(data).length} container versions from workflow config`);
+                }
+            } catch (err) {
+                console.log('Could not load workflow container versions, using fallback data', err);
+            }
+        }
         
         // Track which subsections have been visited
         const visitedSubsections = new Set();
@@ -1336,7 +1357,11 @@
                     });
                 });
 
-                // Fetch BioContainers versions for all tools
+                // Fetch container versions from the workflow's nextflow.config (primary source)
+                const selectedDefinition = getWorkflowDefinition(workflowType, version);
+                await loadWorkflowContainerVersions(workflowType, version, species);
+
+                // Fetch BioContainers versions for all tools (supplementary/live lookup)
                 console.log('Fetching BioContainers versions for tools:', Array.from(allTools));
                 await fetchMultipleToolVersions(Array.from(allTools));
                 
@@ -2416,15 +2441,36 @@
             if (option.value === 'optitype_dna') containerLookupName = 'optitype';
             if (option.value === 'seq2hla_ase') containerLookupName = 'seq2hla';
             
+            // Check if tool has container versions from workflow config (nextflow.config)
+            const wfContainer = workflowContainersCache[containerLookupName];
+
             // Check if tool has container versions (BioContainers or DockerHub)
             const cachedData = biocontainersCache[containerLookupName];
             const hasVersions = cachedData && cachedData.versions && cachedData.versions.length > 0;
-            
-            // Use cached versions or fallback to mock
-            const versions = hasVersions ? cachedData.versions : (mockBiocontainerVersions[containerLookupName] || null);
-            const isOfficial = cachedData?.isOfficial !== false; // True for BioContainers, false for DockerHub
-            const dockerAccount = cachedData?.account;
-            const dockerRepo = cachedData?.repo;
+
+            // Determine recommended version: workflow config > recommendedToolVersions fallback
+            const recommendedVersion = wfContainer?.version || recommendedToolVersions[containerLookupName];
+
+            // Determine versions list: workflow config image info > BioContainers > mock fallback
+            let versions, isOfficial, dockerAccount, dockerRepo;
+            if (wfContainer && wfContainer.version) {
+                // We have data from the workflow's nextflow.config
+                const wfVersions = wfContainer.version ? [wfContainer.version] : [];
+                versions = wfVersions;
+                isOfficial = wfContainer.registry === 'quay.io/biocontainers';
+                dockerAccount = wfContainer.account;
+                dockerRepo = wfContainer.repo;
+            } else if (hasVersions) {
+                versions = cachedData.versions;
+                isOfficial = cachedData.isOfficial !== false;
+                dockerAccount = cachedData.account;
+                dockerRepo = cachedData.repo;
+            } else {
+                versions = mockBiocontainerVersions[containerLookupName] || null;
+                isOfficial = true;
+                dockerAccount = null;
+                dockerRepo = null;
+            }
 
             if (versions) {
                 // Add "Version" label
@@ -2443,9 +2489,7 @@
                 versionSelectElem.dataset.isOfficial = isOfficial;
                 if (dockerAccount) versionSelectElem.dataset.dockerAccount = dockerAccount;
                 if (dockerRepo) versionSelectElem.dataset.dockerRepo = dockerRepo;
-                
-                const recommendedVersion = recommendedToolVersions[containerLookupName];
-                
+
                 versions.forEach(version => {
                     const versionOption = document.createElement('option');
                     versionOption.value = version;
@@ -3306,16 +3350,23 @@
                         // Custom container path
                         config.push(`// ${tool}: ${customContainer}`);
                     } else {
-                        // Check if this is a DockerHub or BioContainers image
-                        const cachedData = biocontainersCache[tool];
                         const version = group.versions[index];
-                        
-                        if (cachedData && cachedData.account && cachedData.repo) {
-                            // DockerHub image
-                            config.push(`// ${tool}: ${cachedData.account}/${cachedData.repo}:${version} (DockerHub)`);
+
+                        // Check workflow containers cache first (from nextflow.config)
+                        const wfContainer = workflowContainersCache[tool];
+                        if (wfContainer && wfContainer.full_image) {
+                            config.push(`// ${tool}: ${wfContainer.full_image}`);
                         } else {
-                            // BioContainers image
-                            config.push(`// ${tool}: quay.io/biocontainers/${tool}:${version}`);
+                            // Check if this is a DockerHub or BioContainers image
+                            const cachedData = biocontainersCache[tool];
+
+                            if (cachedData && cachedData.account && cachedData.repo) {
+                                // DockerHub image
+                                config.push(`// ${tool}: ${cachedData.account}/${cachedData.repo}:${version} (DockerHub)`);
+                            } else {
+                                // BioContainers image
+                                config.push(`// ${tool}: quay.io/biocontainers/${tool}:${version}`);
+                            }
                         }
                     }
                 });
