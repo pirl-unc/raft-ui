@@ -1356,7 +1356,9 @@
                     configPayload = await configResponse.json();
                 } else {
                     const configPath = selectedDefinition.config;
-                    const configResponse = await fetch(gitlabFileUrl(encodeURIComponent('src/raft/ui/static/' + configPath)));
+                    const configUrl = gitlabFileUrl(encodeURIComponent('src/raft/ui/static/' + configPath));
+                    console.log('Fetching config from:', configUrl);
+                    const configResponse = await fetch(configUrl);
                     if (!configResponse.ok) {
                         throw new Error(`Failed to load config template: ${configResponse.status}`);
                     }
