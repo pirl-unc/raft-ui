@@ -1,0 +1,24 @@
+{
+  "workflows": [
+    {
+      "id": "lens",
+      "label": "LENS - Landscape of Effective Neoantigens Software",
+      "default_version": "lens-v1.9-dev",
+      "versions": [
+        {
+          "id": "lens-v1.9-dev",
+          "species": [
+            "human",
+            "mouse"
+          ],
+          "starting_data": [
+            "fastqs",
+            "bams"
+          ],
+          "config": "workflows/lens/lens-v1.9-dev.config",
+          "qc_config": "workflows/lens/qc-metrics.json"
+        }
+      ]
+    }
+  ]
+}
