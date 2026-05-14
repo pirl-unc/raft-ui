@@ -1355,14 +1355,11 @@
                     }
                     configPayload = await configResponse.json();
                 } else {
-                    const configPath = selectedDefinition.version?.config;
-                    if (!configPath) {
-                        throw new Error(`No config path found for ${workflowType}/${version} — selectedDefinition: ${JSON.stringify(selectedDefinition)}`);
-                    }
+                    const configPath = selectedDefinition.version.config;
                     const configUrl = gitlabFileUrl(encodeURIComponent('src/raft/ui/static/' + configPath));
                     const configResponse = await fetch(configUrl);
                     if (!configResponse.ok) {
-                        throw new Error(`Failed to load config template: ${configResponse.status} — URL: ${configUrl}`);
+                        throw new Error(`Failed to load config template: ${configResponse.status}`);
                     }
                     const configText = await configResponse.text();
                     configPayload = { config: configText, ui: selectedDefinition.ui || {} };
