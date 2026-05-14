@@ -1382,7 +1382,6 @@
                 });
 
                 // Fetch container versions from the workflow's nextflow.config (primary source)
-                const selectedDefinition = getWorkflowDefinition(workflowType, version);
                 await loadWorkflowContainerVersions(workflowType, version, species);
 
                 // Fetch BioContainers versions for all tools (supplementary/live lookup)
