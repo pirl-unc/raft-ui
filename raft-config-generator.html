@@ -109,7 +109,7 @@
             
             <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
                 <div>
-                    <label class="block text-sm font-medium text-gray-700 mb-2">Workflow Type</label>
+                    <label class="block text-sm font-medium text-gray-700 mb-2">Workflow</label>
                     <select id="workflowType" class="w-full border border-gray-300 rounded-md p-2 focus:ring-2 focus:ring-blue-500">
                         <option value="">Select workflow...</option>
                     </select>
@@ -242,10 +242,15 @@
         // API configuration
         const API_BASE = window.location.origin;
 
-        // GitLab raw URL base for loading workflow data on GitHub Pages
+        // GitLab API for loading workflow data on GitHub Pages (uses API endpoint for CORS support)
+        const GITLAB_PROJECT_ID = encodeURIComponent('reproducible-analyses-framework-and-tools/raft');
         const DEFAULT_GITLAB_BRANCH = 'v1.5-dev';
         const GITLAB_BRANCH = new URLSearchParams(window.location.search).get('raft_branch') || DEFAULT_GITLAB_BRANCH;
-        const GITLAB_RAW_BASE = `https://gitlab.com/reproducible-analyses-framework-and-tools/raft/-/raw/${GITLAB_BRANCH}/src/raft/ui/static`;
+        const GITLAB_FILE_BASE = `https://gitlab.com/api/v4/projects/${GITLAB_PROJECT_ID}/repository/files`;
+
+        function gitlabFileUrl(encodedPath, branch) {
+            return `${GITLAB_FILE_BASE}/${encodedPath}/raw?ref=${encodeURIComponent(branch || GITLAB_BRANCH)}`;
+        }
 
         // State management
         const state = {
@@ -293,7 +298,7 @@
             if (IS_LOCAL) {
                 response = await fetch(`${API_BASE}/api/workflow-definitions`);
             } else {
-                response = await fetch(`${GITLAB_RAW_BASE}/workflows/index.json`);
+                response = await fetch(gitlabFileUrl(encodeURIComponent('src/raft/ui/static/workflows/index.json')));
             }
             if (!response.ok) {
                 throw new Error(`Unable to load workflow index: ${response.status}`);
@@ -1352,7 +1357,7 @@
                     configPayload = await configResponse.json();
                 } else {
                     const configPath = selectedDefinition.config;
-                    const configResponse = await fetch(`${GITLAB_RAW_BASE}/${configPath}`);
+                    const configResponse = await fetch(gitlabFileUrl(encodeURIComponent('src/raft/ui/static/' + configPath)));
                     if (!configResponse.ok) {
                         throw new Error(`Failed to load config template: ${configResponse.status}`);
                     }
