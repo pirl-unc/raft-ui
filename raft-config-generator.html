@@ -242,9 +242,7 @@
         // API configuration
         const API_BASE = window.location.origin;
 
-        // For hosted (GitHub Pages) mode, workflow data is served from the same origin
-        // alongside this HTML file. For local development, data comes from the local
-        // API server or GitLab.
+        // GitLab API for loading workflow data on GitHub Pages (uses API endpoint for CORS support)
         const GITLAB_PROJECT_ID = encodeURIComponent('reproducible-analyses-framework-and-tools/raft');
         const DEFAULT_GITLAB_BRANCH = 'v1.5-dev';
         const GITLAB_BRANCH = new URLSearchParams(window.location.search).get('raft_branch') || DEFAULT_GITLAB_BRANCH;
@@ -300,7 +298,7 @@
             if (IS_LOCAL) {
                 response = await fetch(`${API_BASE}/api/workflow-definitions`);
             } else {
-                response = await fetch('workflows/index.json');
+                response = await fetch(gitlabFileUrl(encodeURIComponent('src/raft/ui/static/workflows/index.json')));
             }
             if (!response.ok) {
                 throw new Error(`Unable to load workflow index: ${response.status}`);
@@ -1358,7 +1356,9 @@
                     configPayload = await configResponse.json();
                 } else {
                     const configPath = selectedDefinition.config;
-                    const configResponse = await fetch(configPath);
+                    const configUrl = gitlabFileUrl(encodeURIComponent('src/raft/ui/static/' + configPath));
+                    console.log('Fetching config from:', configUrl);
+                    const configResponse = await fetch(configUrl);
                     if (!configResponse.ok) {
                         throw new Error(`Failed to load config template: ${configResponse.status}`);
                     }
