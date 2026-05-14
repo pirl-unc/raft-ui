@@ -243,7 +243,9 @@
         const API_BASE = window.location.origin;
 
         // GitLab raw URL base for loading workflow data on GitHub Pages
-        const GITLAB_RAW_BASE = 'https://gitlab.com/reproducible-analyses-framework-and-tools/raft/-/raw/v1.5-dev/src/raft/ui/static';
+        const DEFAULT_GITLAB_BRANCH = 'v1.5-dev';
+        const GITLAB_BRANCH = new URLSearchParams(window.location.search).get('raft_branch') || DEFAULT_GITLAB_BRANCH;
+        const GITLAB_RAW_BASE = `https://gitlab.com/reproducible-analyses-framework-and-tools/raft/-/raw/${GITLAB_BRANCH}/src/raft/ui/static`;
 
         // State management
         const state = {
@@ -262,8 +264,8 @@
         function getUrlParams() {
             const params = new URLSearchParams(window.location.search);
             return {
-                workflow: params.get('workflow') || '',
-                version: params.get('version') || '',
+                workflow: params.get('workflow') || params.get('wf') || params.get('workflowType') || '',
+                version: params.get('version') || params.get('wf_version') || params.get('workflowVersion') || '',
                 species: params.get('species') || '',
                 startingData: params.get('startingData') || '',
                 maxMem: params.get('max_mem') || '',
@@ -353,14 +355,18 @@
             if (params.maxCpus) {
                 document.getElementById('maxCpus').value = params.maxCpus;
             }
-            // Set version after a short delay to allow version dropdown to populate
+            // Set version — dropdown is already populated synchronously by the change event above
             if (params.version) {
-                setTimeout(() => {
-                    const versionValue = params.version.startsWith(params.workflow)
-                        ? params.version
-                        : `${params.workflow}-${params.version}`;
-                    document.getElementById('workflowVersion').value = versionValue;
-                }, 100);
+                const versionSelect = document.getElementById('workflowVersion');
+                let versionValue = params.version.startsWith(params.workflow)
+                    ? params.version
+                    : `${params.workflow}-${params.version}`;
+                versionSelect.value = versionValue;
+                // Try with 'v' prefix if exact match failed (e.g. lens-1.9-dev → lens-v1.9-dev)
+                if (!versionSelect.value) {
+                    versionValue = `${params.workflow}-v${params.version}`;
+                    versionSelect.value = versionValue;
+                }
             }
         }
 
@@ -917,11 +923,13 @@
 
         // Load container versions from the project's nextflow.config via API
         async function loadWorkflowContainerVersions(workflow, version, species) {
+            if (!IS_LOCAL) {
+                // No local API available on hosted pages; rely on BioContainers fallback
+                return;
+            }
             try {
                 const params = new URLSearchParams({ workflow: workflow || '', version: version || '', species: species || '' });
-                const url = IS_LOCAL
-                    ? `${API_BASE}/api/container-versions?${params}`
-                    : `${API_BASE}/api/container-versions?${params}`;
+                const url = `${API_BASE}/api/container-versions?${params}`;
                 const response = await fetch(url);
                 if (response.ok) {
                     const data = await response.json();
