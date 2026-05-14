@@ -1355,7 +1355,7 @@
                     }
                     configPayload = await configResponse.json();
                 } else {
-                    const configPath = selectedDefinition.config;
+                    const configPath = selectedDefinition.version.config;
                     const configUrl = gitlabFileUrl(encodeURIComponent('src/raft/ui/static/' + configPath));
                     const configResponse = await fetch(configUrl);
                     if (!configResponse.ok) {
