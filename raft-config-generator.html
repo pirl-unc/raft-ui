@@ -1357,10 +1357,9 @@
                 } else {
                     const configPath = selectedDefinition.config;
                     const configUrl = gitlabFileUrl(encodeURIComponent('src/raft/ui/static/' + configPath));
-                    console.log('Fetching config from:', configUrl);
                     const configResponse = await fetch(configUrl);
                     if (!configResponse.ok) {
-                        throw new Error(`Failed to load config template: ${configResponse.status}`);
+                        throw new Error(`Failed to load config template: ${configResponse.status} — URL: ${configUrl}`);
                     }
                     const configText = await configResponse.text();
                     configPayload = { config: configText, ui: selectedDefinition.ui || {} };
