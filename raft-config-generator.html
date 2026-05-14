@@ -344,9 +344,8 @@
 
             if (params.workflow) {
                 document.getElementById('workflowType').value = params.workflow;
-                // Trigger change event to populate versions
-                const event = new Event('change');
-                document.getElementById('workflowType').dispatchEvent(event);
+                // Explicitly populate versions (change listener not yet registered at init time)
+                populateVersionOptions(params.workflow);
             }
             if (params.species) {
                 document.getElementById('species').value = params.species;
