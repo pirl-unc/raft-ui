@@ -333,7 +333,7 @@
             }
         }
 
-        // Initialize form from URL parameters
+        // Initialize form from URL parameters; returns the parsed params
         function initializeFromUrl() {
             const params = getUrlParams();
 
@@ -368,6 +368,7 @@
                     versionSelect.value = versionValue;
                 }
             }
+            return params;
         }
 
         // Auto-save state to server
@@ -1268,7 +1269,18 @@
                 showError(`Failed to load workflow definitions: ${error.message}`);
                 return;
             }
-            initializeFromUrl();
+            const urlParams = initializeFromUrl();
+
+            // Auto-load config when all required params are provided via URL
+            if (urlParams.workflow && urlParams.version && urlParams.species && urlParams.startingData) {
+                const workflowSet = document.getElementById('workflowType').value;
+                const versionSet = document.getElementById('workflowVersion').value;
+                const speciesSet = document.getElementById('species').value;
+                const startingDataSet = document.getElementById('startingData').value;
+                if (workflowSet && versionSet && speciesSet && startingDataSet) {
+                    await loadWorkflowConfig();
+                }
+            }
         }
         initializeApp();
 
