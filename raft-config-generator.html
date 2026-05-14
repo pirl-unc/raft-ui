@@ -1355,7 +1355,10 @@
                     }
                     configPayload = await configResponse.json();
                 } else {
-                    const configPath = selectedDefinition.version.config;
+                    const configPath = selectedDefinition.version?.config;
+                    if (!configPath) {
+                        throw new Error(`No config path found for ${workflowType}/${version} — selectedDefinition: ${JSON.stringify(selectedDefinition)}`);
+                    }
                     const configUrl = gitlabFileUrl(encodeURIComponent('src/raft/ui/static/' + configPath));
                     const configResponse = await fetch(configUrl);
                     if (!configResponse.ok) {
