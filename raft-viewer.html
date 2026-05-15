@@ -2867,6 +2867,7 @@ HLA-C*08:02	EICHTVYYQ	Indel	NPM1	11	94024257	94024259	TA	GGGT	indel	TA>GGGT	p.M1
                             topN={getActiveTopN()}
                             selectedPatient={selectedPatient}
                             topNOnlyViz={topNOnlyViz}
+                            visMetrics={visMetrics}
                           />
                         </div>
                       </div>
@@ -3444,7 +3445,7 @@ HLA-C*08:02	EICHTVYYQ	Indel	NPM1	11	94024257	94024259	TA	GGGT	indel	TA>GGGT	p.M1
     };
 
     // Visualization Panel
-    const VisualizationPanel = ({ fullPatientData, topNData, allPatientsData, sortMetric, selectedRow, setSelectedRow, topN, selectedPatient, topNOnlyViz }) => {
+    const VisualizationPanel = ({ fullPatientData, topNData, allPatientsData, sortMetric, selectedRow, setSelectedRow, topN, selectedPatient, topNOnlyViz, visMetrics }) => {
       const vizData = topNOnlyViz ? topNData : fullPatientData;
       const vizTopN = topNOnlyViz ? topNData : topNData;
       return (
