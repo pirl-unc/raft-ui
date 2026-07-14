@@ -68,11 +68,7 @@
 
     window.setTimeout(window.__RAFT_VIEWER_SHOW_BOOT_ERRORS__, 2500);
   </script>
-  <script
-    type="text/babel"
-    data-presets="env,react"
-    data-plugins="proposal-optional-chaining,proposal-nullish-coalescing-operator"
-  >
+  <script id="raft-viewer-source" type="text/plain">
     const { useState, useMemo, useEffect, useRef } = React;
 
     // Icon component using Lucide
@@ -6158,6 +6154,29 @@
         '<p class="mt-4"><a href="javascript:location.reload()" class="text-blue-600 hover:underline">Click here to retry</a></p>' +
         '</div>';
     }
+  </script>
+  <script>
+    (function () {
+      const sourceEl = document.getElementById('raft-viewer-source');
+      if (!sourceEl) return;
+      try {
+        const result = Babel.transform(sourceEl.textContent, {
+          presets: ['env', 'react'],
+          plugins: ['proposal-optional-chaining', 'proposal-nullish-coalescing-operator']
+        });
+        const compiled = document.createElement('script');
+        compiled.text = result.code;
+        document.body.appendChild(compiled);
+      } catch (error) {
+        const details = [
+          error && error.message ? error.message : String(error || 'Unknown Babel error'),
+          error && error.codeFrame ? error.codeFrame : '',
+          error && error.loc ? `Line ${error.loc.line}, column ${error.loc.column}` : ''
+        ].filter(Boolean).join('\n\n');
+        window.__RAFT_VIEWER_BOOT_ERRORS__.push(details);
+        window.__RAFT_VIEWER_SHOW_BOOT_ERRORS__();
+      }
+    })();
   </script>
 </body>
 </html>
