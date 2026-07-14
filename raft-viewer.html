@@ -6161,7 +6161,7 @@
       if (!sourceEl) return;
       try {
         const result = Babel.transform(sourceEl.textContent, {
-          presets: ['react']
+          presets: [['react', { runtime: 'classic' }]]
         });
         window.eval(result.code + '\n//# sourceURL=raft-viewer-compiled.js');
       } catch (error) {
