@@ -6163,9 +6163,7 @@
         const result = Babel.transform(sourceEl.textContent, {
           presets: ['env', 'react']
         });
-        const compiled = document.createElement('script');
-        compiled.text = result.code;
-        document.body.appendChild(compiled);
+        window.eval(result.code + '\n//# sourceURL=raft-viewer-compiled.js');
       } catch (error) {
         const details = [
           error && error.message ? error.message : String(error || 'Unknown Babel error'),
