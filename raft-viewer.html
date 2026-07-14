@@ -6161,8 +6161,7 @@
       if (!sourceEl) return;
       try {
         const result = Babel.transform(sourceEl.textContent, {
-          presets: ['env', 'react'],
-          plugins: ['proposal-optional-chaining', 'proposal-nullish-coalescing-operator']
+          presets: ['env', 'react']
         });
         const compiled = document.createElement('script');
         compiled.text = result.code;
