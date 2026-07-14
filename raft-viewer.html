@@ -27,6 +27,47 @@
     </div>
   </div>
   <script src="raft-viewer-demo-data.js"></script>
+  <script>
+    window.__RAFT_VIEWER_BOOT_ERRORS__ = [];
+
+    window.addEventListener('error', function (event) {
+      const message = event.error && event.error.stack
+        ? event.error.stack
+        : [event.message, event.filename, event.lineno, event.colno].filter(Boolean).join(' @ ');
+      window.__RAFT_VIEWER_BOOT_ERRORS__.push(message || 'Unknown startup error');
+    });
+
+    window.addEventListener('unhandledrejection', function (event) {
+      const reason = event.reason;
+      const message = reason && reason.stack
+        ? reason.stack
+        : String(reason || 'Unknown unhandled rejection');
+      window.__RAFT_VIEWER_BOOT_ERRORS__.push(message);
+    });
+
+    window.__RAFT_VIEWER_SHOW_BOOT_ERRORS__ = function () {
+      const root = document.getElementById('root');
+      const errors = window.__RAFT_VIEWER_BOOT_ERRORS__ || [];
+      if (!root || errors.length === 0) return;
+      if (!root.textContent.includes('Loading RAFT Viewer')) return;
+      const escaped = errors
+        .map(function (msg) {
+          return String(msg)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;');
+        })
+        .join('\n\n');
+      root.innerHTML =
+        '<div class="p-8 font-sans max-w-4xl">' +
+        '<h2 class="text-red-600 text-xl font-bold mb-4">RAFT Viewer Startup Error</h2>' +
+        '<p class="mb-4 text-gray-700">The app failed before it could replace the loading screen.</p>' +
+        '<pre class="bg-gray-100 p-4 rounded text-xs overflow-auto whitespace-pre-wrap">' + escaped + '</pre>' +
+        '</div>';
+    };
+
+    window.setTimeout(window.__RAFT_VIEWER_SHOW_BOOT_ERRORS__, 2500);
+  </script>
   <script type="text/babel" data-presets="react">
     const { useState, useMemo, useEffect, useRef } = React;
 
