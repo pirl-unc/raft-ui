@@ -68,7 +68,11 @@
 
     window.setTimeout(window.__RAFT_VIEWER_SHOW_BOOT_ERRORS__, 2500);
   </script>
-  <script type="text/babel" data-presets="react">
+  <script
+    type="text/babel"
+    data-presets="env,react"
+    data-plugins="proposal-optional-chaining,proposal-nullish-coalescing-operator"
+  >
     const { useState, useMemo, useEffect, useRef } = React;
 
     // Icon component using Lucide
