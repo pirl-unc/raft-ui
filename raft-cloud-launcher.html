@@ -4,10 +4,10 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>RAFT Cloud Launcher</title>
-  <script src="https://cdn.tailwindcss.com"></script>
-  <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
-  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
-  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <script src="vendor/tailwind.min.js"></script>
+  <script src="vendor/react.production.min.js" crossorigin></script>
+  <script src="vendor/react-dom.production.min.js" crossorigin></script>
+  <script src="vendor/babel.min.js"></script>
   <script src="https://accounts.google.com/gsi/client" async></script>
   <script>
     window.addEventListener('load', function() {
@@ -118,7 +118,7 @@
         '-w', workflow,
         '-v', version,
         '-m', manifestFilename,
-        '--cloud', cloudRoot,
+        '--bucket', cloudRoot,
         '--max-mem', maxMem,
         '--max-cpu', String(maxCpu),
         '--default',
