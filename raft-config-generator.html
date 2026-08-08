@@ -535,9 +535,11 @@
             'sequenza-utils': '3.0.0',
             'sequenzautils': '3.0.0',
             'snaf': '0.7.0-lens-compat-mhcflurry',
+            'msnaf': '1.2',
             'snpeff': 'latest',
             'snpsift': '5.2',
             'snaf': '0.7.0-lens-compat-mhcflurry',
+            'msnaf': '1.2',
             'somalier': '0.2.19',
             'spladder': '3.0.3',
             'squid': '1.5',
@@ -788,6 +790,12 @@
                 account: 'spvensko',
                 repo: 'snaf',
                 versions: ['0.7.0-lens-compat-mhcflurry'],
+                isOfficial: false
+            },
+            'msnaf': {
+                account: 'spvensko',
+                repo: 'msnaf',
+                versions: ['1.2'],
                 isOfficial: false
             },
             'snpeff': {
@@ -1842,27 +1850,38 @@
         }
 
         function getToolOptions(toolName, defaultValue) {
+            // Keep in sync with the tool dispatch in the workflow modules. Each
+            // step tests its parameter with a pattern match, so a value absent
+            // from the module is skipped silently rather than erroring — listing
+            // a tool the workflow does not dispatch on produces a run with that
+            // step quietly missing. The alternative tools tables in the LENS
+            // docs (off_the_shelf_defaults) are generated from the same source.
             const toolOptionMap = {
-                'fq_trim_tool': ['fastp', 'trimmomatic', 'cutadapt'],
-                'aln_tool': ['bwa', 'bwa-mem2', 'bbmap', 'minimap2', 'star', 'hisat2'],
+                'fq_trim_tool': ['fastp', 'trimmomatic', 'trim_galore'],
+                'aln_tool': ['bwa', 'bwa-mem2', 'bwa-mem2_deduped', 'bbmap', 'bowtie2',
+                             'hisat2', 'star', 'minimap2', 'mm2-fast', 'ngmlr', 'mapquik'],
                 'dup_marker_tool': ['bamblaster', 'picard'],
-                'base_recalibrator_tool': ['bqsr'],
-                'indel_realign_tool': ['abra2'],
+                'base_recalibrator_tool': ['gatk4'],
+                'indel_realign_tool': ['abra2', 'abra2_rna'],
                 'som_var_caller': ['mutect2', 'strelka2', 'varscan2', 'abra2'],
-                'germ_var_caller': ['deepvariant', 'haplotypecaller'],
-                'fusion_tool': ['starfusion', 'arriba', 'fusioninspector'],
-                'splice_var_caller': ['snaf', 'neosplice', 'spladder'],
-                'hla_typer': ['optitype', 'arcashla', 'hla-hd', 'seq2hla', 'hlapollo', 'hlaprofiler'],
-                'mhc_caller_tool': ['seq2hla_ase', 'optitype_rna', 'optitype_dna'],
-                'antigen_tool': ['netmhcpan', 'netmhcstabpan', 'mhcflurry', 'hlapollo', 'pepsickle'],
+                'germ_var_caller': ['deepvariant'],
+                'fusion_tool': ['starfusion', 'arriba', 'fusioncatcher', 'longgf', 'squid'],
+                'splice_var_caller': ['msnaf', 'neosplice', 'spladder_build_test'],
+                'hla_typer': ['optitype', 'arcashla', 'seq2hla', 'hlapollo', 'hlaprofiler'],
+                'mhc_caller_tool': ['seq2hla_ase', 'optitype_rna', 'optitype_dna',
+                                    'arcashla', 'hlaprofiler'],
+                'antigen_tool': ['mhcflurry', 'netmhcpan', 'netmhcstabpan', 'netctlpan',
+                                 'hlapollo', 'pepsickle', 'deephlapan', 'antigen_garnish'],
                 'rna_quant_tool': ['salmon', 'kallisto'],
                 'tx_quant_tool': ['salmon', 'kallisto'],
-                'viral_detect_tool': ['virdetect'],
+                'viral_workflow': ['virdetect'],
+                'integration_tool': ['squid', 'gridss2', 'virusbreakend'],
                 'tumor_purities_tool': ['sequenza'],
                 'purity_tool': ['sequenza'],
                 'cna_tool': ['cnvkit'],
                 'phasing_tool': ['whatshap'],
                 'var_phaser_tool': ['whatshap'],
+                'hla_loh_tool': ['lohhla'],
                 'vcf_merge_tool': ['jacquard'],
                 'vcf_merging_tool': ['jacquard']
             };
@@ -1942,6 +1961,7 @@
                 'arriba': 'Arriba',
                 'fusioninspector': 'FusionInspector',
                 'snaf': 'SNAF',
+                'msnaf': 'mSNAF',
                 'neosplice': 'NeoSplice',
                 'spladder': 'SplAdder',
                 'arcashla': 'arcasHLA',
@@ -2944,7 +2964,7 @@
                 annot: { name: 'variant annotation', tools: ['snpeff', 'vep', 'funcotator'] },
                 mhc: { name: 'MHC typing', tools: ['optitype', 'seq2hla', 'arcashla', 'hla-hd'] },
                 fusion: { name: 'gene fusion detection', tools: ['starfusion', 'arriba', 'fusioncatcher'] },
-                splice: { name: 'splice variant analysis', tools: ['snaf', 'neosplice', 'spladder'] },
+                splice: { name: 'splice variant analysis', tools: ['msnaf', 'snaf', 'neosplice', 'spladder'] },
                 viral: { name: 'viral detection', tools: ['virdetect', 'virusseq'] },
                 purity: { name: 'tumor purity estimation', tools: ['sequenza', 'absolute', 'estimate', 'tidyestimate'] },
                 cnv: { name: 'copy number analysis', tools: ['cnvkit', 'sequenza', 'gatk4'] },
