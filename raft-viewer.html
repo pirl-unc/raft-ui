@@ -1314,6 +1314,9 @@ HLA-C*08:02	EICHTVYYQ	Indel	NPM1	11	94024257	94024259	TA	GGGT	indel	TA>GGGT	p.M1
             parsed = parseAppmFile(filename, content, parsed, activeManifest);
             continue;
           }
+          if (isHlaStatsFile(filename)) {
+            parsed = parseHlaStatsFile(filename, content, parsed, activeManifest);
+          }
           // Handle spliceosome sidecar files separately — patient-level data, not pMHC rows
           if (isSpliceosomeFile(filename)) {
             parsed = parseSpliceosomeFile(filename, content, parsed, activeManifest);
@@ -1692,6 +1695,72 @@ HLA-C*08:02	EICHTVYYQ	Indel	NPM1	11	94024257	94024259	TA	GGGT	indel	TA>GGGT	p.M1
       const isAppmFile = (filename) => {
         const basename = String(filename || '').split('/').pop();
         return /\.appm_stats\.tsv$/i.test(basename) || /\.appm\.tsv$/i.test(basename);
+      };
+
+      // Detect HLA allele sidecar files by filename pattern
+      const isHlaStatsFile = (filename) => {
+        const basename = String(filename || '').split('/').pop();
+        return /\.hla_stats\.tsv$/i.test(basename);
+      };
+
+      // Columns carried by the HLA sidecar, in display order.
+      const HLA_STAT_COLUMNS = [
+        { key: 'lohhla_allele_loss_status', label: 'LOH status' },
+        { key: 'lohhla_allele_loss_pval', label: 'LOH p-value' },
+        { key: 'hla_allele_support', label: 'Typing support' },
+        { key: 'hla_allele_raw_read_aligned_count', label: 'Aligned reads' },
+        { key: 'hla_allele_proportion_rna_tumor_reads', label: 'Prop. tumor RNA' },
+        { key: 'hla_allele_proportion_hla_rna_tumor_reads', label: 'Prop. HLA reads' },
+      ];
+
+      // Parse the HLA sidecar and store one entry per allele on the patient.
+      // The file carries one row per candidate, so allele-level values repeat;
+      // collapsing by allele is what makes it usable as a QC table.
+      const parseHlaStatsFile = (filename, content, parsedPatients, manifest = null) => {
+        const lines = String(content || '').split('\n').filter(l => l.trim());
+        if (lines.length < 2) return parsedPatients;
+        const headers = lines[0].split('\t').map(h => h.trim());
+        const alleleIdx = headers.indexOf('allele');
+        if (alleleIdx === -1) return parsedPatients;
+        const present = HLA_STAT_COLUMNS.filter(c => headers.includes(c.key));
+        if (!present.length) return parsedPatients;
+
+        const patientId = inferPatientIdFromFilename(filename, manifest);
+        const byAllele = {};
+        for (let i = 1; i < lines.length; i++) {
+          const values = lines[i].split('\t');
+          const allele = String(values[alleleIdx] || '').trim();
+          if (!allele || byAllele[allele]) continue;
+          const entry = { allele: allele };
+          present.forEach(c => { entry[c.key] = String(values[headers.indexOf(c.key)] ?? '').trim(); });
+          byAllele[allele] = entry;
+        }
+        if (!Object.keys(byAllele).length) return parsedPatients;
+
+        const hlaStats = {
+          columns: present,
+          rows: Object.keys(byAllele).sort().map(a => byAllele[a]),
+        };
+
+        if (!parsedPatients[patientId]) {
+          parsedPatients[patientId] = {
+            id: patientId,
+            isMultiGroup: false,
+            groups: ['default'],
+            files: [],
+            data: [],
+            alleles: new Set(),
+            alleleSupport: {},
+            antigenSources: new Set()
+          };
+        }
+        parsedPatients[patientId].hlaStats = hlaStats;
+        if (parsedPatients[patientId].groupData) {
+          for (const group of Object.keys(parsedPatients[patientId].groupData)) {
+            parsedPatients[patientId].groupData[group].hlaStats = hlaStats;
+          }
+        }
+        return parsedPatients;
       };
 
       // Parse APPM sidecar file and store on patient object
@@ -2265,9 +2334,10 @@ HLA-C*08:02	EICHTVYYQ	Indel	NPM1	11	94024257	94024259	TA	GGGT	indel	TA>GGGT	p.M1
             // Include APPM sidecar patterns alongside report patterns
             const reportPatterns = getReportSectionPatterns(reportTemplate);
             const appmPatterns = ['*.appm_stats.tsv', '*.appm.tsv'];
+            const hlaPatterns = ['*.hla_stats.tsv'];
             const spliceosomePatterns = ['*.spliceosome_stats.tsv', '*.spliceosome.tsv'];
             const vaxrankPatterns = ['*_vaxrank_scores.tsv', '*_vaxrank.csv'];
-            const allPatterns = [...reportPatterns, ...appmPatterns, ...spliceosomePatterns, ...vaxrankPatterns];
+            const allPatterns = [...reportPatterns, ...appmPatterns, ...hlaPatterns, ...spliceosomePatterns, ...vaxrankPatterns];
             const patternsParam = allPatterns.length > 0 ? `&patterns=${encodeURIComponent(allPatterns.join(','))}` : '';
             const listResp = await fetch(`${API_BASE}/api/files?dir=${encodeURIComponent(urlParams.preload)}${patternsParam}`);
             if (!listResp.ok) throw new Error('Failed to list files');
@@ -2285,6 +2355,9 @@ HLA-C*08:02	EICHTVYYQ	Indel	NPM1	11	94024257	94024259	TA	GGGT	indel	TA>GGGT	p.M1
                 if (isAppmFile(name)) {
                   parsed = parseAppmFile(name, content, parsed, manifest);
                   continue;
+                }
+                if (isHlaStatsFile(name)) {
+                  parsed = parseHlaStatsFile(name, content, parsed, manifest);
                 }
                 // Handle spliceosome sidecar files separately
                 if (isSpliceosomeFile(name)) {
@@ -2407,6 +2480,9 @@ HLA-C*08:02	EICHTVYYQ	Indel	NPM1	11	94024257	94024259	TA	GGGT	indel	TA>GGGT	p.M1
             if (isAppmFile(file.name)) {
               parsed = parseAppmFile(file.name, ev.target.result, parsed, manifestData);
             } else if (isSpliceosomeFile(file.name)) {
+            if (isHlaStatsFile(file.name)) {
+              parsed = parseHlaStatsFile(file.name, ev.target.result, parsed, manifestData);
+            }
               parsed = parseSpliceosomeFile(file.name, ev.target.result, parsed, manifestData);
             } else if (isVaxrankFile(file.name)) {
               parsed = parseVaxrankFile(file.name, ev.target.result, parsed, manifestData);
@@ -2750,6 +2826,9 @@ HLA-C*08:02	EICHTVYYQ	Indel	NPM1	11	94024257	94024259	TA	GGGT	indel	TA>GGGT	p.M1
           if (isAppmFile(filename)) {
             parsed = parseAppmFile(filename, content, parsed, manifestData);
             continue;
+          }
+          if (isHlaStatsFile(filename)) {
+            parsed = parseHlaStatsFile(filename, content, parsed, manifestData);
           }
           // Handle spliceosome sidecar files separately
           if (isSpliceosomeFile(filename)) {
@@ -4229,6 +4308,7 @@ HLA-C*08:02	EICHTVYYQ	Indel	NPM1	11	94024257	94024259	TA	GGGT	indel	TA>GGGT	p.M1
                     <QCSummaryDashboard
                       patient={selectedPatient}
                       qcData={qcData}
+                      hlaStats={patients[selectedPatient]?.hlaStats}
                     />
                   </div>
                   ) : isReportSection ? (
@@ -6082,7 +6162,7 @@ HLA-C*08:02	EICHTVYYQ	Indel	NPM1	11	94024257	94024259	TA	GGGT	indel	TA>GGGT	p.M1
       );
     };
 
-    const QCSummaryDashboard = ({ patient, qcData }) => {
+    const QCSummaryDashboard = ({ patient, qcData, hlaStats }) => {
       const [showInDepth, setShowInDepth] = useState(false);
       const [selectedQcGroup, setSelectedQcGroup] = useState(null);
       useEffect(() => { setSelectedQcGroup(null); }, [patient]);
@@ -6523,6 +6603,55 @@ HLA-C*08:02	EICHTVYYQ	Indel	NPM1	11	94024257	94024259	TA	GGGT	indel	TA>GGGT	p.M1
             </h2>
             {renderContent()}
           </div>
+
+          {hlaStats && hlaStats.rows && hlaStats.rows.length > 0 && (
+            <div className="bg-white rounded-lg shadow-md p-6">
+              <h2 className="text-xl font-semibold text-gray-800 mb-1 flex items-center gap-2">
+                <Icon name="shield" size={24} />
+                HLA Allele Metrics
+              </h2>
+              <p className="text-sm text-gray-500 mb-4">
+                Allele-level read support and LOHHLA results. A candidate presented on an
+                allele lost through LOH is not a viable target, so check these before
+                committing to candidates. <span className="text-gray-400">LOH status
+                reports whether a p-value could be computed, not whether the allele was
+                lost — judge loss from the p-value itself.</span>
+              </p>
+              <div className="overflow-x-auto">
+                <table className="min-w-full text-sm">
+                  <thead>
+                    <tr className="bg-gray-50 border-b border-gray-200">
+                      <th className="text-left font-medium text-gray-600 px-3 py-2">Allele</th>
+                      {hlaStats.columns.map(c => (
+                        <th key={c.key} className="text-left font-medium text-gray-600 px-3 py-2">{c.label}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {hlaStats.rows.map((row, i) => {
+                      const status = String(row.lohhla_allele_loss_status || '');
+                      const noResult = status.indexOf('NO_LOHHLA') === 0;
+                      return (
+                        <tr key={row.allele} className={i % 2 ? 'bg-gray-50' : ''}>
+                          <td className="px-3 py-2 font-mono text-gray-800">{row.allele}</td>
+                          {hlaStats.columns.map(c => {
+                            const raw = row[c.key];
+                            const val = (raw === undefined || raw === '' || raw === 'NA') ? '-' : raw;
+                            const isStatus = c.key === 'lohhla_allele_loss_status';
+                            return (
+                              <td key={c.key} className={isStatus && noResult ? 'px-3 py-2 text-amber-600' : 'px-3 py-2 text-gray-700'}>
+                                {val}
+                              </td>
+                            );
+                          })}
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
 
           {renderFilesSection()}
 

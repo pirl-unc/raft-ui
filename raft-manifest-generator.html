@@ -831,11 +831,11 @@
                 </div>
                 <div className="md:col-span-2 lg:col-span-3">
                   <label className="block text-xs font-medium text-gray-700 mb-1">
-                    Group (hyphen delimited)
+                    Group (semicolon delimited)
                     <InfoTooltip text={`Optional group identifier for subjoin functionality.\n\nRules:\n• Must be unique per patient\n• Use hyphen for multiple groups (e.g., '1-2')\n• Defaults to Patient Name if not specified\n\nExamples: 1, timepoint1, 1-2, pre-post`} />
                   </label>
                   <input type="text" value={currentSample.Group} onChange={(e) => setCurrentSample({ ...currentSample, Group: e.target.value })}
-                    placeholder="e.g., 1, 1-2, pre-post (defaults to <Patient_Name>)" className="w-full px-2 py-1.5 text-sm border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500" />
+                    placeholder="e.g., 1, 1;2, pre;post (defaults to <Patient_Name>)" className="w-full px-2 py-1.5 text-sm border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500" />
                 </div>
                 <div className="md:col-span-2 lg:col-span-3">
                   <label className="block text-xs font-medium text-gray-700 mb-1">
